@@ -10,52 +10,56 @@ static void PrintUsage()
     wprintf(L"Usage: UsbProtectionCtl.exe enable|disable|status\n");
 }
 
-static bool Connect(HANDLE* portHandle)
+static BOOL Connect(HANDLE* portHandle)
 {
     HRESULT hr = FilterConnectCommunicationPort(USB_PROTECTION_PORT_NAME,
                                                 0,
-                                                nullptr,
+                                                NULL,
                                                 0,
-                                                nullptr,
+                                                NULL,
                                                 portHandle);
     if (FAILED(hr)) {
         fwprintf(stderr, L"FilterConnectCommunicationPort failed, hr=0x%08X\n", hr);
-        return false;
+        return FALSE;
     }
 
-    return true;
+    return TRUE;
 }
 
-static bool SendCommand(HANDLE portHandle, USB_PROTECTION_COMMAND command)
+static BOOL SendCommand(HANDLE portHandle, USB_PROTECTION_COMMAND command)
 {
-    USB_PROTECTION_MESSAGE message = {};
+    USB_PROTECTION_MESSAGE message;
     DWORD bytesReturned = 0;
     HRESULT hr;
 
-    message.Command = static_cast<USBP_UINT32>(command);
+    ZeroMemory(&message, sizeof(message));
+    message.Command = (USBP_UINT32)command;
 
     hr = FilterSendMessage(portHandle,
                            &message,
                            sizeof(message),
-                           nullptr,
+                           NULL,
                            0,
                            &bytesReturned);
     if (FAILED(hr)) {
         fwprintf(stderr, L"FilterSendMessage failed, hr=0x%08X\n", hr);
-        return false;
+        return FALSE;
     }
 
-    return true;
+    return TRUE;
 }
 
-static bool QueryStatus(HANDLE portHandle)
+static BOOL QueryStatus(HANDLE portHandle)
 {
-    USB_PROTECTION_MESSAGE message = {};
-    USB_PROTECTION_REPLY reply = {};
+    USB_PROTECTION_MESSAGE message;
+    USB_PROTECTION_REPLY reply;
     DWORD bytesReturned = 0;
     HRESULT hr;
 
-    message.Command = static_cast<USBP_UINT32>(UsbProtectionQueryStatus);
+    ZeroMemory(&message, sizeof(message));
+    ZeroMemory(&reply, sizeof(reply));
+
+    message.Command = (USBP_UINT32)UsbProtectionQueryStatus;
 
     hr = FilterSendMessage(portHandle,
                            &message,
@@ -65,22 +69,22 @@ static bool QueryStatus(HANDLE portHandle)
                            &bytesReturned);
     if (FAILED(hr)) {
         fwprintf(stderr, L"FilterSendMessage(status) failed, hr=0x%08X\n", hr);
-        return false;
+        return FALSE;
     }
 
     if (bytesReturned < sizeof(reply)) {
         fwprintf(stderr, L"Invalid status reply from driver\n");
-        return false;
+        return FALSE;
     }
 
     wprintf(L"Protection: %s\n", reply.ProtectionEnabled ? L"ON" : L"OFF");
-    return true;
+    return TRUE;
 }
 
 int wmain(int argc, wchar_t** argv)
 {
     HANDLE portHandle = INVALID_HANDLE_VALUE;
-    bool ok = false;
+    BOOL ok = FALSE;
 
     if (argc != 2) {
         PrintUsage();
@@ -105,7 +109,7 @@ int wmain(int argc, wchar_t** argv)
         ok = QueryStatus(portHandle);
     } else {
         PrintUsage();
-        ok = false;
+        ok = FALSE;
     }
 
     CloseHandle(portHandle);

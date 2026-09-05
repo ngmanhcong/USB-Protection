@@ -3,8 +3,8 @@
 Proof-of-Concept Windows USB data-leak prevention project:
 
 - Kernel-mode File System Minifilter Driver in C.
-- Windows Service in C++.
-- Console control utility in C++.
+- Windows Service in C.
+- Console control utility in C.
 - Communication through a Filter Manager communication port named `\UsbProtectionPort`.
 
 The driver allows USB reads and USB-to-local copies, but when protection is ON it blocks create/write/overwrite/delete-like file modifications on USB/removable storage by returning `STATUS_ACCESS_DENIED` from minifilter pre-operation callbacks.
@@ -25,8 +25,8 @@ The minifilter attaches to file system volumes. At `InstanceSetup`, it queries t
 - `Driver/Communication.c`, `Communication.h`: Filter Manager communication port.
 - `Driver/SharedProtocol.h`: shared command/reply protocol.
 - `Driver/UsbProtection.inf`: development/test minifilter INF.
-- `Service/*`: Windows service and driver communication helper.
-- `Control/*`: `UsbProtectionCtl.exe` command-line utility.
+- `Service/*`: C Windows service and driver communication helper.
+- `Control/*`: C `UsbProtectionCtl.exe` command-line utility.
 - `UsbProtection.sln`: Visual Studio solution.
 
 ## Prerequisites

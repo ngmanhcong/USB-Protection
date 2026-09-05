@@ -4,9 +4,9 @@
 
 #include "DriverCommunication.h"
 
-static SERVICE_STATUS gServiceStatus = {};
-static SERVICE_STATUS_HANDLE gServiceStatusHandle = nullptr;
-static HANDLE gStopEvent = nullptr;
+static SERVICE_STATUS gServiceStatus = { 0 };
+static SERVICE_STATUS_HANDLE gServiceStatusHandle = NULL;
+static HANDLE gStopEvent = NULL;
 static HANDLE gDriverPort = INVALID_HANDLE_VALUE;
 
 static void LogLastError(const wchar_t* message)
@@ -26,7 +26,7 @@ static void SetServiceState(DWORD state, DWORD win32ExitCode, DWORD waitHint)
         gServiceStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN;
     }
 
-    if (gServiceStatusHandle != nullptr) {
+    if (gServiceStatusHandle != NULL) {
         SetServiceStatus(gServiceStatusHandle, &gServiceStatus);
     }
 }
@@ -45,7 +45,7 @@ DWORD WINAPI UsbProtectionServiceHandler(DWORD control, DWORD eventType, LPVOID 
         }
 
         SetServiceState(SERVICE_STOP_PENDING, NO_ERROR, 3000);
-        if (gStopEvent != nullptr) {
+        if (gStopEvent != NULL) {
             SetEvent(gStopEvent);
         }
         break;
@@ -64,8 +64,8 @@ void WINAPI UsbProtectionServiceMain(DWORD argc, LPWSTR* argv)
 
     gServiceStatusHandle = RegisterServiceCtrlHandlerExW(USB_PROTECTION_SERVICE_NAME,
                                                          UsbProtectionServiceHandler,
-                                                         nullptr);
-    if (gServiceStatusHandle == nullptr) {
+                                                         NULL);
+    if (gServiceStatusHandle == NULL) {
         LogLastError(L"RegisterServiceCtrlHandlerExW");
         return;
     }
@@ -75,8 +75,8 @@ void WINAPI UsbProtectionServiceMain(DWORD argc, LPWSTR* argv)
 
     SetServiceState(SERVICE_START_PENDING, NO_ERROR, 3000);
 
-    gStopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (gStopEvent == nullptr) {
+    gStopEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (gStopEvent == NULL) {
         DWORD error = GetLastError();
         LogLastError(L"CreateEventW");
         SetServiceState(SERVICE_STOPPED, error, 0);
@@ -87,7 +87,7 @@ void WINAPI UsbProtectionServiceMain(DWORD argc, LPWSTR* argv)
         DWORD error = GetLastError();
         LogLastError(L"FilterConnectCommunicationPort");
         CloseHandle(gStopEvent);
-        gStopEvent = nullptr;
+        gStopEvent = NULL;
         SetServiceState(SERVICE_STOPPED, error, 0);
         return;
     }
@@ -98,7 +98,7 @@ void WINAPI UsbProtectionServiceMain(DWORD argc, LPWSTR* argv)
         UsbProtectionDisconnect(gDriverPort);
         gDriverPort = INVALID_HANDLE_VALUE;
         CloseHandle(gStopEvent);
-        gStopEvent = nullptr;
+        gStopEvent = NULL;
         SetServiceState(SERVICE_STOPPED, error, 0);
         return;
     }
@@ -113,7 +113,7 @@ void WINAPI UsbProtectionServiceMain(DWORD argc, LPWSTR* argv)
     gDriverPort = INVALID_HANDLE_VALUE;
 
     CloseHandle(gStopEvent);
-    gStopEvent = nullptr;
+    gStopEvent = NULL;
 
     SetServiceState(SERVICE_STOPPED, NO_ERROR, 0);
 }

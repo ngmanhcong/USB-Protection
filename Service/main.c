@@ -6,8 +6,8 @@
 int wmain()
 {
     SERVICE_TABLE_ENTRYW serviceTable[] = {
-        { const_cast<LPWSTR>(USB_PROTECTION_SERVICE_NAME), UsbProtectionServiceMain },
-        { nullptr, nullptr }
+        { (LPWSTR)USB_PROTECTION_SERVICE_NAME, UsbProtectionServiceMain },
+        { NULL, NULL }
     };
 
     if (!StartServiceCtrlDispatcherW(serviceTable)) {

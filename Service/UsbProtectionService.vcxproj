@@ -42,9 +42,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="DriverCommunication.cpp" />
-    <ClCompile Include="main.cpp" />
-    <ClCompile Include="Service.cpp" />
+    <ClCompile Include="DriverCommunication.c" />
+    <ClCompile Include="main.c" />
+    <ClCompile Include="Service.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DriverCommunication.h" />
