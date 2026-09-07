@@ -1,6 +1,6 @@
-#include <ntddstor.h>
-
 #include "UsbDetection.h"
+
+#include <ntddstor.h>
 
 #define USBP_STORAGE_DESCRIPTOR_SIZE 1024
 

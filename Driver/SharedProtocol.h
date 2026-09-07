@@ -7,7 +7,7 @@
  * service/control utility.
  */
 
-#ifdef _KERNEL_MODE
+#if defined(_KERNEL_MODE) || defined(_NTDDK_) || defined(_FLT_KERNEL_)
 #include <fltKernel.h>
 typedef ULONG USBP_UINT32;
 #else
@@ -26,8 +26,8 @@ typedef enum _USB_PROTECTION_COMMAND {
 
 typedef struct _USB_PROTECTION_MESSAGE {
     USBP_UINT32 Command;
-} USB_PROTECTION_MESSAGE;
+} USB_PROTECTION_MESSAGE, *PUSB_PROTECTION_MESSAGE;
 
 typedef struct _USB_PROTECTION_REPLY {
     USBP_UINT32 ProtectionEnabled;
-} USB_PROTECTION_REPLY;
+} USB_PROTECTION_REPLY, *PUSB_PROTECTION_REPLY;

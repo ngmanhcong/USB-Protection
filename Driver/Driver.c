@@ -3,6 +3,8 @@
 #include "Communication.h"
 #include "UsbDetection.h"
 
+#include <stdarg.h>
+
 #pragma prefast(disable:__WARNING_ENCODE_MEMBER_FUNCTION_POINTER, "Not valid for kernel mode drivers")
 
 PFLT_FILTER gUsbProtectFilter = NULL;
