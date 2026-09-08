@@ -10,6 +10,7 @@ ClassGuid={b86dff51-a31e-4bac-b3cf-e8cfe75c9fc2}
 Provider=%ManufacturerName%
 DriverVer=09/04/2026,1.0.0.0
 CatalogFile=UsbProtection.cat
+PnpLockdown=1
 
 [DestinationDirs]
 DefaultDestDir=12
@@ -23,6 +24,7 @@ CopyFiles=UsbProtection.DriverFiles
 AddService=%ServiceName%,,UsbProtection.ServiceInstall
 
 [DefaultUninstall.NTamd64]
+LegacyUninstall=1
 DelFiles=UsbProtection.DriverFiles
 
 [DefaultUninstall.NTamd64.Services]
@@ -43,9 +45,9 @@ LoadOrderGroup="FSFilter Activity Monitor"
 AddReg=UsbProtection.AddRegistry
 
 [UsbProtection.AddRegistry]
-HKR,"Instances","DefaultInstance",0x00000000,%DefaultInstance%
-HKR,"Instances\%InstanceName%","Altitude",0x00000000,%Altitude%
-HKR,"Instances\%InstanceName%","Flags",0x00010001,0x0
+HKR,"Parameters\Instances","DefaultInstance",0x00000000,%DefaultInstance%
+HKR,"Parameters\Instances\%InstanceName%","Altitude",0x00000000,%Altitude%
+HKR,"Parameters\Instances\%InstanceName%","Flags",0x00010001,0x0
 
 [SourceDisksFiles]
 UsbProtectionDriver.sys=1

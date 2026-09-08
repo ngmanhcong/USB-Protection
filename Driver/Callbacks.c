@@ -77,6 +77,55 @@ UsbProtectCreateMayModifyFile(
 }
 
 static
+BOOLEAN
+UsbProtectSetInformationMayModifyFile(
+    _In_ PFLT_CALLBACK_DATA Data
+    )
+{
+    FILE_INFORMATION_CLASS informationClass;
+    PVOID informationBuffer;
+
+    informationClass = Data->Iopb->Parameters.SetFileInformation.FileInformationClass;
+    informationBuffer = Data->Iopb->Parameters.SetFileInformation.InfoBuffer;
+
+    switch (informationClass) {
+    case FileBasicInformation:
+    case FileAllocationInformation:
+    case FileEndOfFileInformation:
+    case FileRenameInformation:
+    case FileLinkInformation:
+    case FileShortNameInformation:
+    case FileValidDataLengthInformation:
+    case FileRenameInformationEx:
+    case FileLinkInformationEx:
+        return TRUE;
+
+    case FileDispositionInformation:
+        if (informationBuffer != NULL) {
+            PFILE_DISPOSITION_INFORMATION disposition;
+
+            disposition = (PFILE_DISPOSITION_INFORMATION)informationBuffer;
+            return disposition->DeleteFile ? TRUE : FALSE;
+        }
+        return TRUE;
+
+    case FileDispositionInformationEx:
+        if (informationBuffer != NULL) {
+            PFILE_DISPOSITION_INFORMATION_EX dispositionEx;
+
+            dispositionEx = (PFILE_DISPOSITION_INFORMATION_EX)informationBuffer;
+            return ((dispositionEx->Flags & FILE_DISPOSITION_DELETE) != 0) ? TRUE : FALSE;
+        }
+        return TRUE;
+
+    default:
+        break;
+    }
+
+    return FALSE;
+}
+
+static
 FLT_PREOP_CALLBACK_STATUS
 UsbProtectCompleteAccessDenied(
     _Inout_ PFLT_CALLBACK_DATA Data
@@ -85,6 +134,31 @@ UsbProtectCompleteAccessDenied(
     Data->IoStatus.Status = STATUS_ACCESS_DENIED;
     Data->IoStatus.Information = 0;
     return FLT_PREOP_COMPLETE;
+}
+
+FLT_PREOP_CALLBACK_STATUS
+UsbProtectPreSetInformation(
+    _Inout_ PFLT_CALLBACK_DATA Data,
+    _In_ PCFLT_RELATED_OBJECTS FltObjects,
+    _Flt_CompletionContext_Outptr_ PVOID *CompletionContext
+    )
+{
+    UNREFERENCED_PARAMETER(CompletionContext);
+
+    if (!UsbProtectIsProtectionEnabled()) {
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    if (!UsbProtectSetInformationMayModifyFile(Data)) {
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    if (!UsbProtectIsProtectedTarget(FltObjects)) {
+        return FLT_PREOP_SUCCESS_NO_CALLBACK;
+    }
+
+    USBP_LOG("USB file information change blocked");
+    return UsbProtectCompleteAccessDenied(Data);
 }
 
 FLT_PREOP_CALLBACK_STATUS

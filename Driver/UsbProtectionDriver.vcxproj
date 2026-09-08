@@ -25,6 +25,7 @@
     <CharacterSet>Unicode</CharacterSet>
     <SpectreMitigation>false</SpectreMitigation>
     <Driver_SpectreMitigation>false</Driver_SpectreMitigation>
+    <DriverTargetPlatform>Desktop</DriverTargetPlatform>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ConfigurationType>Driver</ConfigurationType>
@@ -86,7 +87,8 @@
   </ItemGroup>
   <ItemGroup>
     <FilesToPackage Include="$(OutDir)$(TargetName)$(TargetExt)">
-      <PackageRelativeDirectory></PackageRelativeDirectory>
+      <PackageRelativeDirectory>
+      </PackageRelativeDirectory>
     </FilesToPackage>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

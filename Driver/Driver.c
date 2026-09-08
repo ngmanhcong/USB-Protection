@@ -14,6 +14,7 @@ volatile LONG gUsbProtectEnabled = 1;
 CONST FLT_OPERATION_REGISTRATION gUsbProtectCallbacks[] = {
     { IRP_MJ_CREATE, 0, UsbProtectPreCreate, NULL },
     { IRP_MJ_WRITE, 0, UsbProtectPreWrite, NULL },
+    { IRP_MJ_SET_INFORMATION, 0, UsbProtectPreSetInformation, NULL },
     { IRP_MJ_OPERATION_END }
 };
 
