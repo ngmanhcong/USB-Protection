@@ -60,6 +60,7 @@ UsbProtectQueryVolumeUsbState(
     PDEVICE_OBJECT diskDeviceObject = NULL;
     UCHAR descriptorBuffer[USBP_STORAGE_DESCRIPTOR_SIZE];
     PSTORAGE_DEVICE_DESCRIPTOR descriptor;
+    BOOLEAN deviceIsRemovable;
 
     PAGED_CODE();
 
@@ -79,6 +80,9 @@ UsbProtectQueryVolumeUsbState(
         return status;
     }
 
+    deviceIsRemovable =
+        ((diskDeviceObject->Characteristics & FILE_REMOVABLE_MEDIA) != 0) ? TRUE : FALSE;
+
     RtlZeroMemory(descriptorBuffer, sizeof(descriptorBuffer));
     status = UsbProtectSendStorageQuery(diskDeviceObject,
                                         descriptorBuffer,
@@ -86,7 +90,8 @@ UsbProtectQueryVolumeUsbState(
     ObDereferenceObject(diskDeviceObject);
 
     if (!NT_SUCCESS(status)) {
-        return status;
+        *IsRemovable = deviceIsRemovable;
+        return deviceIsRemovable ? STATUS_SUCCESS : status;
     }
 
     descriptor = (PSTORAGE_DEVICE_DESCRIPTOR)descriptorBuffer;
@@ -95,7 +100,7 @@ UsbProtectQueryVolumeUsbState(
     }
 
     *IsUsb = (descriptor->BusType == BusTypeUsb) ? TRUE : FALSE;
-    *IsRemovable = descriptor->RemovableMedia ? TRUE : FALSE;
+    *IsRemovable = (descriptor->RemovableMedia || deviceIsRemovable) ? TRUE : FALSE;
 
     return STATUS_SUCCESS;
 }
