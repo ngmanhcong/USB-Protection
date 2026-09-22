@@ -3,13 +3,15 @@
 ; Development/test minifilter installation file for Windows 10/11 x64.
 ;
 
+;cho windows biet cach cai dat driver cua minh nhu the nao
+
 [Version]
-Signature="$WINDOWS NT$"
-Class=ActivityMonitor
-ClassGuid={b86dff51-a31e-4bac-b3cf-e8cfe75c9fc2}
-Provider=%ManufacturerName%
+Signature="$WINDOWS NT$" ; thong tin nhan dang driver
+Class=ActivityMonitor ; nhom driver, o day la nhom ActivityMonitor
+ClassGuid={b86dff51-a31e-4bac-b3cf-e8cfe75c9fc2} ; ma dinh danh
+Provider=%ManufacturerName% ; ten nha cung cap driver
 DriverVer=09/04/2026,1.0.0.0
-CatalogFile=UsbProtection.cat
+CatalogFile=UsbProtection.cat ; file .cat - file luu chu ky va tinh toan ven cua driver
 PnpLockdown=1
 
 [DestinationDirs]
