@@ -1,4 +1,4 @@
-#include "Driver.h"
+﻿#include "Driver.h"
 #include "Callbacks.h"
 #include "Communication.h"
 #include "UsbDetection.h"
@@ -11,6 +11,9 @@ PFLT_FILTER gUsbProtectFilter = NULL;
 PFLT_PORT gUsbProtectServerPort = NULL;
 volatile LONG gUsbProtectEnabled = 1;
 
+/*
+bảng đăng kí operation mà driver muốn theo dõi
+*/
 CONST FLT_OPERATION_REGISTRATION gUsbProtectCallbacks[] = {
     { IRP_MJ_CREATE, 0, UsbProtectPreCreate, NULL },
     { IRP_MJ_WRITE, 0, UsbProtectPreWrite, NULL },
@@ -18,6 +21,9 @@ CONST FLT_OPERATION_REGISTRATION gUsbProtectCallbacks[] = {
     { IRP_MJ_OPERATION_END }
 };
 
+/*
+driver sử dụng context gắn với từng minifilter instance
+*/
 CONST FLT_CONTEXT_REGISTRATION gUsbProtectContexts[] = {
     {
         FLT_INSTANCE_CONTEXT,
@@ -29,6 +35,9 @@ CONST FLT_CONTEXT_REGISTRATION gUsbProtectContexts[] = {
     { FLT_CONTEXT_END }
 };
 
+/*
+mô tả cho filter manager biết driver có gì
+*/
 CONST FLT_REGISTRATION gUsbProtectRegistration = {
     sizeof(FLT_REGISTRATION),
     FLT_REGISTRATION_VERSION,
@@ -47,6 +56,9 @@ CONST FLT_REGISTRATION gUsbProtectRegistration = {
     NULL
 };
 
+/*
+hàm thực hiện atomically để kiểm tra xem protection có đang bật hay không
+*/
 BOOLEAN
 UsbProtectIsProtectionEnabled(
     VOID
@@ -74,6 +86,9 @@ UsbProtectLog(
     DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_INFO_LEVEL, "\n");
 }
 
+/*
+bật tắt protection, atomically
+*/
 VOID
 UsbProtectSetProtectionEnabled(
     _In_ BOOLEAN Enabled
