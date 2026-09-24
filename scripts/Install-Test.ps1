@@ -57,10 +57,10 @@ $serviceName = "UsbProtectionService"
 & sc.exe query $serviceName *> $null
 if ($LASTEXITCODE -eq 0) {
     & sc.exe stop $serviceName *> $null
-    & sc.exe config $serviceName "binPath= `"$serviceExe`"" "start= auto"
+    & sc.exe config $serviceName binPath= $serviceExe start= auto
     if ($LASTEXITCODE -ne 0) { throw "Could not update the Windows service." }
 } else {
-    & sc.exe create $serviceName "binPath= `"$serviceExe`"" "start= auto"
+    & sc.exe create $serviceName binPath= $serviceExe start= auto
     if ($LASTEXITCODE -ne 0) { throw "Could not create the Windows service." }
 }
 
