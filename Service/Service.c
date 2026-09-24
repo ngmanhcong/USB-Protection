@@ -3,11 +3,51 @@
 #include <stdio.h>
 
 #include "DriverCommunication.h"
+#include "../Common/PolicyStore.h"
 
 static SERVICE_STATUS gServiceStatus = { 0 };
 static SERVICE_STATUS_HANDLE gServiceStatusHandle = NULL;
 static HANDLE gStopEvent = NULL;
 static HANDLE gDriverPort = INVALID_HANDLE_VALUE;
+
+static BOOL ApplySavedPolicy(HANDLE driverPort)
+{
+    USBP_SAVED_POLICY policy;
+    DWORD index;
+
+    if (!UsbPolicyLoad(&policy)) {
+        return FALSE;
+    }
+
+    if (!UsbProtectionSendClearApprovedDevices(driverPort)) {
+        return FALSE;
+    }
+
+    for (index = 0; index < policy.ApprovedDeviceCount; index++) {
+        if (!UsbProtectionSendAddApprovedDevice(driverPort,
+                                                policy.ApprovedDevices[index])) {
+            return FALSE;
+        }
+    }
+
+    if (policy.DataLeakProtectionEnabled) {
+        if (!UsbProtectionSendEnable(driverPort)) {
+            return FALSE;
+        }
+    } else if (!UsbProtectionSendDisable(driverPort)) {
+        return FALSE;
+    }
+
+    if (!UsbProtectionSendSetExecutableBlocking(
+            driverPort,
+            policy.ExecutableBlockingEnabled != 0)) {
+        return FALSE;
+    }
+
+    /* Enable this last, after every approved device has reached the driver. */
+    return UsbProtectionSendSetApprovedOnly(driverPort,
+                                            policy.ApprovedOnlyEnabled != 0);
+}
 
 static void LogLastError(const wchar_t* message)
 {
@@ -92,9 +132,9 @@ void WINAPI UsbProtectionServiceMain(DWORD argc, LPWSTR* argv)
         return;
     }
 
-    if (!UsbProtectionSendEnable(gDriverPort)) {
+    if (!ApplySavedPolicy(gDriverPort)) {
         DWORD error = GetLastError();
-        LogLastError(L"UsbProtectionSendEnable");
+        LogLastError(L"ApplySavedPolicy");
         UsbProtectionDisconnect(gDriverPort);
         gDriverPort = INVALID_HANDLE_VALUE;
         CloseHandle(gStopEvent);

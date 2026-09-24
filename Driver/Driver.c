@@ -10,14 +10,25 @@
 PFLT_FILTER gUsbProtectFilter = NULL;
 PFLT_PORT gUsbProtectServerPort = NULL;
 volatile LONG gUsbProtectEnabled = 1;
+volatile LONG gUsbProtectExecutableBlockingEnabled = 1;
+volatile LONG gUsbProtectApprovedOnlyEnabled = 0;
+
+static KSPIN_LOCK gUsbProtectApprovedDevicesLock;
+static ULONGLONG gUsbProtectApprovedDevices[USB_PROTECTION_MAX_APPROVED_DEVICES];
+static ULONG gUsbProtectApprovedDeviceCount = 0;
 
 /*
 bảng đăng kí operation mà driver muốn theo dõi
 */
 CONST FLT_OPERATION_REGISTRATION gUsbProtectCallbacks[] = {
     { IRP_MJ_CREATE, 0, UsbProtectPreCreate, NULL },
+    { IRP_MJ_READ, 0, UsbProtectPreRead, NULL },
     { IRP_MJ_WRITE, 0, UsbProtectPreWrite, NULL },
     { IRP_MJ_SET_INFORMATION, 0, UsbProtectPreSetInformation, NULL },
+    { IRP_MJ_ACQUIRE_FOR_SECTION_SYNCHRONIZATION,
+      0,
+      UsbProtectPreAcquireForSectionSynchronization,
+      NULL },
     { IRP_MJ_OPERATION_END }
 };
 
@@ -97,6 +108,179 @@ UsbProtectSetProtectionEnabled(
     InterlockedExchange((volatile LONG *)&gUsbProtectEnabled, Enabled ? 1 : 0);
 }
 
+BOOLEAN
+UsbProtectIsExecutableBlockingEnabled(
+    VOID
+    )
+{
+    return (InterlockedCompareExchange(
+                (volatile LONG *)&gUsbProtectExecutableBlockingEnabled,
+                0,
+                0) != 0);
+}
+
+VOID
+UsbProtectSetExecutableBlockingEnabled(
+    _In_ BOOLEAN Enabled
+    )
+{
+    InterlockedExchange((volatile LONG *)&gUsbProtectExecutableBlockingEnabled,
+                        Enabled ? 1 : 0);
+}
+
+BOOLEAN
+UsbProtectIsApprovedOnlyEnabled(
+    VOID
+    )
+{
+    return (InterlockedCompareExchange(
+                (volatile LONG *)&gUsbProtectApprovedOnlyEnabled,
+                0,
+                0) != 0);
+}
+
+VOID
+UsbProtectSetApprovedOnlyEnabled(
+    _In_ BOOLEAN Enabled
+    )
+{
+    InterlockedExchange((volatile LONG *)&gUsbProtectApprovedOnlyEnabled,
+                        Enabled ? 1 : 0);
+}
+
+NTSTATUS
+UsbProtectAddApprovedDevice(
+    _In_ ULONGLONG DeviceHash
+    )
+{
+    KIRQL oldIrql;
+    ULONG index;
+    NTSTATUS status = STATUS_SUCCESS;
+
+    if (DeviceHash == 0) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    KeAcquireSpinLock(&gUsbProtectApprovedDevicesLock, &oldIrql);
+
+    for (index = 0; index < gUsbProtectApprovedDeviceCount; index++) {
+        if (gUsbProtectApprovedDevices[index] == DeviceHash) {
+            goto Exit;
+        }
+    }
+
+    if (gUsbProtectApprovedDeviceCount >= USB_PROTECTION_MAX_APPROVED_DEVICES) {
+        status = STATUS_INSUFFICIENT_RESOURCES;
+        goto Exit;
+    }
+
+    gUsbProtectApprovedDevices[gUsbProtectApprovedDeviceCount++] = DeviceHash;
+
+Exit:
+    KeReleaseSpinLock(&gUsbProtectApprovedDevicesLock, oldIrql);
+    return status;
+}
+
+BOOLEAN
+UsbProtectRemoveApprovedDevice(
+    _In_ ULONGLONG DeviceHash
+    )
+{
+    KIRQL oldIrql;
+    ULONG index;
+    BOOLEAN removed = FALSE;
+
+    KeAcquireSpinLock(&gUsbProtectApprovedDevicesLock, &oldIrql);
+
+    for (index = 0; index < gUsbProtectApprovedDeviceCount; index++) {
+        if (gUsbProtectApprovedDevices[index] == DeviceHash) {
+            gUsbProtectApprovedDeviceCount--;
+            gUsbProtectApprovedDevices[index] =
+                gUsbProtectApprovedDevices[gUsbProtectApprovedDeviceCount];
+            gUsbProtectApprovedDevices[gUsbProtectApprovedDeviceCount] = 0;
+            removed = TRUE;
+            break;
+        }
+    }
+
+    KeReleaseSpinLock(&gUsbProtectApprovedDevicesLock, oldIrql);
+    return removed;
+}
+
+VOID
+UsbProtectClearApprovedDevices(
+    VOID
+    )
+{
+    KIRQL oldIrql;
+
+    KeAcquireSpinLock(&gUsbProtectApprovedDevicesLock, &oldIrql);
+    RtlZeroMemory(gUsbProtectApprovedDevices, sizeof(gUsbProtectApprovedDevices));
+    gUsbProtectApprovedDeviceCount = 0;
+    KeReleaseSpinLock(&gUsbProtectApprovedDevicesLock, oldIrql);
+}
+
+BOOLEAN
+UsbProtectIsDeviceApproved(
+    _In_ ULONGLONG DeviceHash
+    )
+{
+    KIRQL oldIrql;
+    ULONG index;
+    BOOLEAN approved = FALSE;
+
+    if (DeviceHash == 0) {
+        return FALSE;
+    }
+
+    KeAcquireSpinLock(&gUsbProtectApprovedDevicesLock, &oldIrql);
+    for (index = 0; index < gUsbProtectApprovedDeviceCount; index++) {
+        if (gUsbProtectApprovedDevices[index] == DeviceHash) {
+            approved = TRUE;
+            break;
+        }
+    }
+    KeReleaseSpinLock(&gUsbProtectApprovedDevicesLock, oldIrql);
+
+    return approved;
+}
+
+ULONG
+UsbProtectGetApprovedDeviceCount(
+    VOID
+    )
+{
+    KIRQL oldIrql;
+    ULONG count;
+
+    KeAcquireSpinLock(&gUsbProtectApprovedDevicesLock, &oldIrql);
+    count = gUsbProtectApprovedDeviceCount;
+    KeReleaseSpinLock(&gUsbProtectApprovedDevicesLock, oldIrql);
+    return count;
+}
+
+BOOLEAN
+UsbProtectGetApprovedDeviceAt(
+    _In_ ULONG Index,
+    _Out_ PULONGLONG DeviceHash
+    )
+{
+    KIRQL oldIrql;
+    BOOLEAN found = FALSE;
+
+    if (DeviceHash == NULL) {
+        return FALSE;
+    }
+
+    KeAcquireSpinLock(&gUsbProtectApprovedDevicesLock, &oldIrql);
+    if (Index < gUsbProtectApprovedDeviceCount) {
+        *DeviceHash = gUsbProtectApprovedDevices[Index];
+        found = TRUE;
+    }
+    KeReleaseSpinLock(&gUsbProtectApprovedDevicesLock, oldIrql);
+    return found;
+}
+
 NTSTATUS
 DriverEntry(
     _In_ PDRIVER_OBJECT DriverObject,
@@ -108,6 +292,11 @@ DriverEntry(
     UNREFERENCED_PARAMETER(RegistryPath);
 
     UsbProtectSetProtectionEnabled(TRUE);
+    UsbProtectSetExecutableBlockingEnabled(TRUE);
+    UsbProtectSetApprovedOnlyEnabled(FALSE);
+    KeInitializeSpinLock(&gUsbProtectApprovedDevicesLock);
+    RtlZeroMemory(gUsbProtectApprovedDevices, sizeof(gUsbProtectApprovedDevices));
+    gUsbProtectApprovedDeviceCount = 0;
 
     status = FltRegisterFilter(DriverObject, &gUsbProtectRegistration, &gUsbProtectFilter);
     if (!NT_SUCCESS(status)) {
@@ -171,6 +360,7 @@ UsbProtectInstanceSetup(
     PUSBPROTECT_INSTANCE_CONTEXT context = NULL;
     BOOLEAN isUsb = FALSE;
     BOOLEAN isRemovable = FALSE;
+    ULONGLONG deviceHash = 0;
 
     UNREFERENCED_PARAMETER(Flags);
     UNREFERENCED_PARAMETER(VolumeDeviceType);
@@ -192,7 +382,10 @@ UsbProtectInstanceSetup(
 
     RtlZeroMemory(context, sizeof(USBPROTECT_INSTANCE_CONTEXT));
 
-    status = UsbProtectQueryVolumeUsbState(FltObjects->Volume, &isUsb, &isRemovable);
+    status = UsbProtectQueryVolumeUsbState(FltObjects->Volume,
+                                           &isUsb,
+                                           &isRemovable,
+                                           &deviceHash);
     if (!NT_SUCCESS(status)) {
         /*
          * Detection failure should not prevent the filter from attaching.
@@ -201,10 +394,12 @@ UsbProtectInstanceSetup(
         USBP_LOG("USB detection failed, attaching as non-removable: 0x%08X", status);
         isUsb = FALSE;
         isRemovable = FALSE;
+        deviceHash = 0;
     }
 
     context->IsUsb = isUsb;
     context->IsRemovable = isRemovable;
+    context->DeviceHash = deviceHash;
 
     status = FltSetInstanceContext(FltObjects->Instance,
                                    FLT_SET_CONTEXT_KEEP_IF_EXISTS,
@@ -220,7 +415,7 @@ UsbProtectInstanceSetup(
     USBP_LOG("Instance attached");
 
     if (isUsb || isRemovable) {
-        USBP_LOG("USB/removable volume detected");
+        USBP_LOG("USB/removable volume detected, hash=0x%I64X", deviceHash);
     }
 
     return STATUS_SUCCESS;

@@ -1,74 +1,80 @@
 # USB Protection
 
-Proof-of-Concept Windows USB data-leak prevention project:
+Proof-of-Concept Windows USB protection project written in C:
 
-- Kernel-mode File System Minifilter Driver in C.
-- Windows Service in C.
-- Console control utility in C.
-- Communication through a Filter Manager communication port named `\UsbProtectionPort`.
+- Kernel-mode File System Minifilter Driver.
+- Windows Service.
+- Console control utility.
+- Native Win32 management UI.
+- Filter Manager communication through `\UsbProtectionPort`.
 
-The driver allows USB reads and USB-to-local copies, but when protection is ON it blocks create/write/overwrite/delete-like file modifications on USB/removable storage by returning `STATUS_ACCESS_DENIED` from minifilter pre-operation callbacks.
+## Protection policies
+
+The project provides three independent policies:
+
+1. **Data-leak protection** blocks create, write, overwrite, rename, delete, and other file modifications on USB/removable storage. USB reads and USB-to-local copies remain available.
+2. **Executable blocking** denies executable image mappings from USB and blocks script types such as `.bat`, `.cmd`, `.ps1`, `.vbs`, `.js`, and `.hta` when they are opened.
+3. **Approved-device-only mode** denies file access to USB storage whose fingerprint is not in the allowlist.
+
+The fingerprint is an FNV-1a hash of the storage descriptor's vendor, product, revision, and serial fields. Policies and up to 64 approved fingerprints are persisted under `HKLM\SOFTWARE\UsbProtection` and restored by the Windows service.
 
 ## Architecture
 
 Application or Explorer -> I/O Manager -> Filter Manager -> `UsbProtection` minifilter -> File System -> Storage.
 
-The minifilter attaches to file system volumes. At `InstanceSetup`, it queries the backing disk device with `IOCTL_STORAGE_QUERY_PROPERTY` and caches `BusTypeUsb` plus `RemovableMedia` in a non-paged instance context. `IRP_MJ_CREATE` and `IRP_MJ_WRITE` callbacks then only read cached context and an atomic `ProtectionEnabled` flag.
+At `InstanceSetup`, the minifilter queries the backing disk using `IOCTL_STORAGE_QUERY_PROPERTY`. It caches `BusTypeUsb`, `RemovableMedia`, and the device fingerprint in a non-paged instance context. `IRP_MJ_CREATE`, `IRP_MJ_READ`, `IRP_MJ_WRITE`, `IRP_MJ_SET_INFORMATION`, and executable-section callbacks use this cached context, so no storage query runs on the I/O hot path.
 
-`UsbProtectionService` connects to `\UsbProtectionPort` with `FilterConnectCommunicationPort` and keeps the connection open while the service runs. `UsbProtectionCtl.exe` can connect independently and send `enable`, `disable`, and `status` commands with `FilterSendMessage`.
+`UsbProtectionService` connects to `\UsbProtectionPort`, restores the saved policies and allowlist, and keeps the connection open. `UsbProtectionUI.exe` manages all policies and connected USB devices. `UsbProtectionCtl.exe` remains available for the original data-leak `enable`, `disable`, and `status` commands.
 
-## Source Layout
+## Source layout
 
-- `Driver/Driver.c`, `Driver.h`: registration, unload, instance context, global protection state.
-- `Driver/Callbacks.c`, `Callbacks.h`: `IRP_MJ_CREATE` and `IRP_MJ_WRITE` blocking logic.
-- `Driver/UsbDetection.c`, `UsbDetection.h`: storage property query and USB/removable detection.
+- `Driver/Driver.c`, `Driver.h`: registration, instance context, global policies, and the in-kernel allowlist.
+- `Driver/Callbacks.c`, `Callbacks.h`: file-access, modification, and executable mapping enforcement.
+- `Driver/UsbDetection.c`, `UsbDetection.h`: USB/removable detection and fingerprinting.
 - `Driver/Communication.c`, `Communication.h`: Filter Manager communication port.
-- `Driver/SharedProtocol.h`: shared command/reply protocol.
+- `Driver/SharedProtocol.h`: kernel/user-mode command protocol.
 - `Driver/UsbProtection.inf`: development/test minifilter INF.
-- `Service/*`: C Windows service and driver communication helper.
-- `Control/*`: C `UsbProtectionCtl.exe` command-line utility.
-- `UsbProtection.sln`: Visual Studio solution.
+- `Service/*`: Windows service and communication helper.
+- `Control/*`: command-line utility.
+- `Common/*`: Registry policy store and user-mode USB enumeration/fingerprinting.
+- `UI/*`: dark native Win32 management application.
+- `scripts/Install-Test.ps1`: elevated test-VM installer and launcher.
 
-## Prerequisites
+## Prerequisites and build
 
 - Windows 10/11 x64 test machine or VM.
 - Visual Studio 2022 with Desktop development with C++.
-- Windows SDK.
-- Windows Driver Kit matching the SDK.
-- Administrator command prompt.
-- Kernel debugging setup is strongly recommended.
+- Windows SDK and matching WDK.
+- Administrator access.
+- A VM snapshot and kernel debugging are strongly recommended.
 
-Test in a VM with a snapshot. A kernel driver bug can crash Windows.
+Open `UsbProtection.sln` and build `Debug|x64`. Expected outputs in `x64\Debug` are:
 
-## Build
+- `UsbProtectionDriver.sys` plus the `UsbProtectionDriver` package directory.
+- `UsbProtectionService.exe`.
+- `UsbProtectionCtl.exe`.
+- `UsbProtectionUI.exe`.
 
-Open `UsbProtection.sln` in Visual Studio and build `Debug|x64`.
-
-Expected outputs are under each project output directory:
-
-- `UsbProtectionDriver.sys`
-- `UsbProtection.inf`
-- `UsbProtectionService.exe`
-- `UsbProtectionCtl.exe`
-
-This workspace may not have Visual Studio/WDK installed, so build verification must be performed on a configured WDK machine.
-
-## Driver Signing and Test Mode
-
-This is a development driver. Unsigned x64 kernel drivers do not load normally on Windows.
-
-For a test VM:
+An unsigned x64 kernel driver does not load normally. For a test VM, enable test signing and reboot:
 
 ```cmd
 bcdedit /set testsigning on
 shutdown /r /t 0
 ```
 
-Build with test signing enabled in Visual Studio or sign the package with a test certificate. Production deployment requires proper driver signing and a real Microsoft-assigned minifilter altitude.
+In Visual Studio, select a valid test certificate under the driver project's **Driver Signing** properties and build again. If the certificate was created on the development machine, import the generated `UsbProtectionDriver.cer` into the VM's `Trusted Root Certification Authorities` and `Trusted Publishers` stores. Production deployment requires Microsoft signing and an assigned minifilter altitude.
 
-## Install and Run
+## Install and run in the VM
 
-From an elevated command prompt in the driver package output directory:
+From an elevated PowerShell window at the repository root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Install-Test.ps1 -Configuration Debug -TrustTestCertificate
+```
+
+Only use `-TrustTestCertificate` inside a disposable test VM and for a certificate you generated. The script installs and loads the driver, creates or updates the service, starts it, and opens the UI.
+
+The equivalent manual driver commands from the package output directory are:
 
 ```cmd
 pnputil /add-driver UsbProtection.inf /install
@@ -76,16 +82,14 @@ fltmc load UsbProtection
 fltmc filters
 ```
 
-`fltmc filters` should show `UsbProtection`.
-
-Install and start the service:
+Install and start the service manually if needed:
 
 ```cmd
-sc create UsbProtectionService binPath= "C:\Path\To\UsbProtectionService.exe" start= demand
+sc create UsbProtectionService binPath= "C:\Path\To\UsbProtectionService.exe" start= auto
 sc start UsbProtectionService
 ```
 
-Use the control utility:
+Run `UsbProtectionUI.exe` as administrator. The legacy CLI controls data-leak protection only:
 
 ```cmd
 UsbProtectionCtl.exe status
@@ -100,66 +104,38 @@ sc stop UsbProtectionService
 fltmc unload UsbProtection
 ```
 
-## Demo Tests
+## VM test plan
 
-Create local test folders:
+### Data-leak protection
 
 ```cmd
 mkdir C:\Temp
 mkdir C:\Temp2
 echo test>C:\Temp\a.txt
-```
-
-TEST 1 - Driver loaded:
-
-```cmd
-fltmc filters
-```
-
-Expected: `UsbProtection` appears.
-
-TEST 2 - Local write:
-
-```cmd
 copy C:\Temp\a.txt C:\Temp2\a.txt
-```
-
-Expected: success.
-
-TEST 3 - USB read:
-
-```cmd
 copy E:\a.txt C:\Temp\a-from-usb.txt
-```
-
-Expected: success, where `E:` is the USB drive.
-
-TEST 4 - USB write with protection ON:
-
-```cmd
-UsbProtectionCtl.exe enable
 copy C:\Temp\a.txt E:\a.txt
 ```
 
-Expected: blocked with access denied.
+With data-leak protection on, local writes and USB-to-local reads succeed, while the final local-to-USB copy is denied. With that toggle off, the local-to-USB copy succeeds.
 
-TEST 5 - Disable:
+### Executable blocking
 
-```cmd
-UsbProtectionCtl.exe disable
-copy C:\Temp\a.txt E:\a.txt
-```
+1. Temporarily disable data-leak protection.
+2. Copy harmless test files such as `notepad.exe`, `test.bat`, and `test.ps1` to the USB.
+3. Enable **Chặn tệp tin thực thi**.
+4. Try to run each file from the USB.
 
-Expected: success.
+Expected: Windows reports access denied. Ordinary document reads remain available.
 
-TEST 6 - Enable again:
+### Approved devices
 
-```cmd
-UsbProtectionCtl.exe enable
-copy C:\Temp\a.txt E:\a2.txt
-```
+1. Keep **Chỉ cho phép thiết bị đã phê duyệt** off.
+2. Connect the first USB, select it in the UI, and click **Phê duyệt**.
+3. Enable approved-device-only mode. The approved USB remains accessible.
+4. Connect a second, unapproved USB and try to open or copy a file from it.
 
-Expected: blocked with access denied.
+Expected: file access on the second USB is denied. The drive can still appear in Explorer or Device Manager because this project enforces access in the file-system minifilter; it does not disable the physical PnP device. Revoking the first USB blocks subsequent file access on it too.
 
 ## Debugging
 
@@ -170,28 +146,24 @@ Useful commands:
 ```cmd
 fltmc filters
 fltmc instances UsbProtection
-fltmc unload UsbProtection
 sc query UsbProtectionService
 sc query UsbProtection
 ```
 
-Common issues:
+Common checks:
 
-- Driver does not load: check test signing, architecture, INF install, catalog/signature, and Event Viewer.
-- `FltRegisterFilter` fails: confirm the service name, INF registration, and that `FltMgr` is present.
-- `FltStartFiltering` fails: inspect DbgPrint output and service registry entries.
-- Instance does not attach: check `fltmc instances`, file system support, and altitude conflicts.
-- USB detected as local: inspect the storage stack; some external disks expose `BusTypeUsb` but `RemovableMedia=false`, while some card readers expose removable media differently. This PoC treats either `BusTypeUsb` or `RemovableMedia` as protected.
-- USB not detected: verify `IOCTL_STORAGE_QUERY_PROPERTY` succeeds against the volume disk device and debug `UsbProtectQueryVolumeUsbState`.
-- `PreCreate` blocks too much: review desired access, create disposition, and delete-on-close cases in `Callbacks.c`.
-- `PreWrite` does not run: confirm the filter is attached to the USB volume and the target operation actually writes file data.
-- Service connect fails: ensure the driver is loaded and `\UsbProtectionPort` was created.
-- `FilterSendMessage` fails: check protocol buffer sizes and that the port connection handle is valid.
-- Unload fails: stop the service/control clients and retry `fltmc unload UsbProtection`.
-- BSOD: use a VM snapshot and collect crash dump with WinDbg; inspect callback IRQL, context references, and storage query path.
+- `DPVerifierTask` reports a missing `x86\InfVerif.dll`: repair/reinstall the matching WDK. A source-only local build can temporarily use `/p:SkipPackageVerification=true`, but validate the INF and sign the package before VM installation.
+- Driver does not load: verify test-signing mode, architecture, INF/catalog signature, trusted certificate, and Event Viewer.
+- Filter does not attach: inspect `fltmc instances`, file-system support, and altitude conflicts.
+- USB is misclassified: inspect the storage stack; this PoC treats either `BusTypeUsb` or `RemovableMedia` as protected.
+- UI cannot connect: ensure the driver is loaded and `\UsbProtectionPort` exists.
+- Policy is lost after reboot: ensure `UsbProtectionService` is set to auto-start and can read `HKLM\SOFTWARE\UsbProtection`.
+- BSOD: revert the VM snapshot, collect a crash dump, and inspect callback IRQL and context references in WinDbg.
 
-## Notes
+## Limitations
 
-The INF uses altitude `370030` only as a development/test placeholder. Production minifilter drivers must request and use an official altitude from Microsoft.
-
-The PoC intentionally does not implement GUI, encryption, malware scanning, executable blocking, USB whitelists, or drive-letter based decisions.
+- The INF altitude `370030` is a development placeholder. Production minifilters must use an altitude assigned by Microsoft.
+- Script formats are blocked at file-open time because interpreters read scripts as data rather than map them as executable images. This also prevents reading/copying those script files from USB while executable blocking is enabled.
+- Devices without usable vendor/product/serial descriptor data cannot be safely fingerprinted and cannot be approved.
+- Fingerprints without a serial number identify a model rather than one physical unit; the UI warns about this case.
+- The PoC does not implement encryption, malware scanning, content inspection, or physical USB/PnP device disablement.

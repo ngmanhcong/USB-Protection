@@ -8,6 +8,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "UsbProtectionService", "Ser
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "UsbProtectionCtl", "Control\UsbProtectionCtl.vcxproj", "{8CF3C7F6-67D9-47ED-8FAF-30D298F93585}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "UsbProtectionUI", "UI\UsbProtectionUI.vcxproj", "{1EDECF02-C8AD-4D1E-95EC-A99C14F2D86A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -26,5 +28,9 @@ Global
 		{8CF3C7F6-67D9-47ED-8FAF-30D298F93585}.Debug|x64.Build.0 = Debug|x64
 		{8CF3C7F6-67D9-47ED-8FAF-30D298F93585}.Release|x64.ActiveCfg = Release|x64
 		{8CF3C7F6-67D9-47ED-8FAF-30D298F93585}.Release|x64.Build.0 = Release|x64
+		{1EDECF02-C8AD-4D1E-95EC-A99C14F2D86A}.Debug|x64.ActiveCfg = Debug|x64
+		{1EDECF02-C8AD-4D1E-95EC-A99C14F2D86A}.Debug|x64.Build.0 = Debug|x64
+		{1EDECF02-C8AD-4D1E-95EC-A99C14F2D86A}.Release|x64.ActiveCfg = Release|x64
+		{1EDECF02-C8AD-4D1E-95EC-A99C14F2D86A}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 EndGlobal

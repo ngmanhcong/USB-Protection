@@ -15,15 +15,15 @@ CatalogFile=UsbProtection.cat ; file .cat - file luu chu ky va tinh toan ven cua
 PnpLockdown=1
 
 [DestinationDirs]
-DefaultDestDir=12
-UsbProtection.DriverFiles=12
+DefaultDestDir=12 ; thu muc dich mac dinh
+UsbProtection.DriverFiles=12 ; thu muc chua cac file driver
 
 [DefaultInstall.NTamd64]
-OptionDesc=%ServiceDescription%
-CopyFiles=UsbProtection.DriverFiles
+OptionDesc=%ServiceDescription%	; mo ta lua chon cai dat
+CopyFiles=UsbProtection.DriverFiles ; copy cac file trong section
 
 [DefaultInstall.NTamd64.Services]
-AddService=%ServiceName%,,UsbProtection.ServiceInstall
+AddService=%ServiceName%,,UsbProtection.ServiceInstall ; them service vao he thong
 
 [DefaultUninstall.NTamd64]
 LegacyUninstall=1
