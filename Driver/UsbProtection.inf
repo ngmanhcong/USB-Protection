@@ -17,6 +17,7 @@ PnpLockdown=1
 [DestinationDirs]
 DefaultDestDir=12 ; thu muc dich mac dinh
 UsbProtection.DriverFiles=12 ; thu muc chua cac file driver
+UsbProtection.DeleteDriverFiles=12
 
 [DefaultInstall.NTamd64]
 OptionDesc=%ServiceDescription%	; mo ta lua chon cai dat
@@ -34,12 +35,15 @@ AddService=%ServiceName%,,UsbProtection.ServiceInstall
 
 [DefaultUninstall.NTamd64]
 LegacyUninstall=1
-DelFiles=UsbProtection.DriverFiles
+DelFiles=UsbProtection.DeleteDriverFiles
 
 [DefaultUninstall.NTamd64.Services]
 DelService=%ServiceName%,0x200
 
 [UsbProtection.DriverFiles]
+UsbProtectionDriver.sys
+
+[UsbProtection.DeleteDriverFiles]
 UsbProtectionDriver.sys
 
 [UsbProtection.ServiceInstall]
