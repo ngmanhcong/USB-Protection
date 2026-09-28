@@ -23,7 +23,14 @@ OptionDesc=%ServiceDescription%	; mo ta lua chon cai dat
 CopyFiles=UsbProtection.DriverFiles ; copy cac file trong section
 
 [DefaultInstall.NTamd64.Services]
-AddService=%ServiceName%,,UsbProtection.ServiceInstall ; them service vao he thong
+AddService=%ServiceName%,,UsbProtection.Downlevel.ServiceInstall ; them service vao he thong
+
+[DefaultInstall.NTamd64.10.0...25952]
+OptionDesc=%ServiceDescription%
+CopyFiles=UsbProtection.DriverFiles
+
+[DefaultInstall.NTamd64.10.0...25952.Services]
+AddService=%ServiceName%,,UsbProtection.ServiceInstall
 
 [DefaultUninstall.NTamd64]
 LegacyUninstall=1
@@ -50,6 +57,22 @@ AddReg=UsbProtection.AddRegistry
 HKR,"Parameters\Instances","DefaultInstance",0x00000000,%DefaultInstance%
 HKR,"Parameters\Instances\%InstanceName%","Altitude",0x00000000,%Altitude%
 HKR,"Parameters\Instances\%InstanceName%","Flags",0x00010001,0x0
+
+[UsbProtection.Downlevel.ServiceInstall]
+DisplayName=%ServiceDisplayName%
+Description=%ServiceDescription%
+ServiceBinary=%12%\UsbProtectionDriver.sys
+Dependencies=FltMgr
+ServiceType=2
+StartType=3
+ErrorControl=1
+LoadOrderGroup="FSFilter Activity Monitor"
+AddReg=UsbProtection.Downlevel.AddRegistry
+
+[UsbProtection.Downlevel.AddRegistry]
+HKR,"Instances","DefaultInstance",0x00000000,%DefaultInstance%
+HKR,"Instances\%InstanceName%","Altitude",0x00000000,%Altitude%
+HKR,"Instances\%InstanceName%","Flags",0x00010001,0x0
 
 [SourceDisksFiles]
 UsbProtectionDriver.sys=1
