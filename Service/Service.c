@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "DriverCommunication.h"
+#include "UsbDeviceMonitor.h"
 #include "../Common/PolicyStore.h"
 
 static SERVICE_STATUS gServiceStatus = { 0 };
@@ -143,11 +144,21 @@ void WINAPI UsbProtectionServiceMain(DWORD argc, LPWSTR* argv)
         return;
     }
 
+    /*
+     * Device-level enforcement is additive. If PnP monitoring cannot start,
+     * keep the service and the existing minifilter policies operational.
+     */
+    if (!UsbDeviceMonitorStart()) {
+        LogLastError(L"UsbDeviceMonitorStart");
+    }
+
     SetServiceState(SERVICE_RUNNING, NO_ERROR, 0);
 
     WaitForSingleObject(gStopEvent, INFINITE);
 
     SetServiceState(SERVICE_STOP_PENDING, NO_ERROR, 3000);
+
+    UsbDeviceMonitorStop();
 
     UsbProtectionDisconnect(gDriverPort);
     gDriverPort = INVALID_HANDLE_VALUE;

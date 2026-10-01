@@ -40,20 +40,24 @@
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>FltLib.lib;Advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>FltLib.lib;Advapi32.lib;Cfgmgr32.lib;Setupapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\Common\PolicyStore.c" />
+    <ClCompile Include="..\Common\UsbDevices.c" />
     <ClCompile Include="DriverCommunication.c" />
     <ClCompile Include="main.c" />
     <ClCompile Include="Service.c" />
+    <ClCompile Include="UsbDeviceMonitor.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Common\PolicyStore.h" />
+    <ClInclude Include="..\Common\UsbDevices.h" />
     <ClInclude Include="DriverCommunication.h" />
     <ClInclude Include="Service.h" />
     <ClInclude Include="SharedProtocol.h" />
+    <ClInclude Include="UsbDeviceMonitor.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

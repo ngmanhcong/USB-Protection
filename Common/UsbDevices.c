@@ -53,8 +53,8 @@ static ULONGLONG HashDescriptorField(const BYTE* descriptorBuffer,
     return HashByte(hash, '|');
 }
 
-static ULONGLONG HashStorageDescriptor(const BYTE* descriptorBuffer,
-                                       DWORD descriptorLength)
+ULONGLONG UsbDevicesHashStorageDescriptor(const BYTE* descriptorBuffer,
+                                          DWORD descriptorLength)
 {
     const STORAGE_DEVICE_DESCRIPTOR* descriptor;
     ULONGLONG hash = 14695981039346656037ULL;
@@ -223,7 +223,7 @@ DWORD UsbDevicesEnumerate(PUSBP_DEVICE_INFO devices, DWORD capacity)
             continue;
         }
 
-        hash = HashStorageDescriptor(descriptorBuffer, descriptorLength);
+        hash = UsbDevicesHashStorageDescriptor(descriptorBuffer, descriptorLength);
         StringCchPrintfW(driveLabel, ARRAYSIZE(driveLabel), L"%c:",
                          L'A' + letterIndex);
 

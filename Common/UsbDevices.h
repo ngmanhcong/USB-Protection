@@ -12,4 +12,6 @@ typedef struct _USBP_DEVICE_INFO {
     BOOL RemovableMedia;
 } USBP_DEVICE_INFO, *PUSBP_DEVICE_INFO;
 
+ULONGLONG UsbDevicesHashStorageDescriptor(const BYTE* descriptorBuffer,
+                                          DWORD descriptorLength);
 DWORD UsbDevicesEnumerate(PUSBP_DEVICE_INFO devices, DWORD capacity);

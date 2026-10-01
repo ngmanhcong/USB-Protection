@@ -16,6 +16,13 @@ The project provides three independent policies:
 2. **Executable blocking** denies executable image mappings from USB and blocks script types such as `.bat`, `.cmd`, `.ps1`, `.vbs`, `.js`, and `.hta` when they are opened.
 3. **Approved-device-only mode** denies file access to USB storage whose fingerprint is not in the allowlist.
 
+When approved-device-only mode is enabled, the Windows service also applies a
+best-effort device-level policy. It monitors disk device-interface arrival,
+confirms `BusTypeUsb`, reuses the same fingerprint and Registry allowlist, and
+disables the matching `USB\\VID_xxxx&PID_yyyy` devnode when the device
+is not approved. The service never targets controllers, root hubs, HID devices,
+or non-storage USB interfaces.
+
 The fingerprint is an FNV-1a hash of the storage descriptor's vendor, product, revision, and serial fields. Policies and up to 64 approved fingerprints are persisted under `HKLM\SOFTWARE\UsbProtection` and restored by the Windows service.
 
 ## Architecture
@@ -35,6 +42,8 @@ At `InstanceSetup`, the minifilter queries the backing disk using `IOCTL_STORAGE
 - `Driver/SharedProtocol.h`: kernel/user-mode command protocol.
 - `Driver/UsbProtection.inf`: development/test minifilter INF.
 - `Service/*`: Windows service and communication helper.
+- `Service/UsbDeviceMonitor.c`, `UsbDeviceMonitor.h`: user-mode PnP monitoring,
+  startup enumeration, allowlist checks, and safe USB storage devnode disable.
 - `Control/*`: command-line utility.
 - `Common/*`: Registry policy store and user-mode USB enumeration/fingerprinting.
 - `UI/*`: dark native Win32 management application.
@@ -158,6 +167,9 @@ Common checks:
 - USB is misclassified: inspect the storage stack; this PoC treats either `BusTypeUsb` or `RemovableMedia` as protected.
 - UI cannot connect: ensure the driver is loaded and `\UsbProtectionPort` exists.
 - Policy is lost after reboot: ensure `UsbProtectionService` is set to auto-start and can read `HKLM\SOFTWARE\UsbProtection`.
+- Device-level disable fails: confirm the service is running as LocalSystem or
+  another account allowed to change PnP device state, then capture
+  `[DeviceControl]` messages with DebugView.
 - BSOD: revert the VM snapshot, collect a crash dump, and inspect callback IRQL and context references in WinDbg.
 
 ## Limitations
@@ -166,4 +178,15 @@ Common checks:
 - Script formats are blocked at file-open time because interpreters read scripts as data rather than map them as executable images. This also prevents reading/copying those script files from USB while executable blocking is enabled.
 - Devices without usable vendor/product/serial descriptor data cannot be safely fingerprinted and cannot be approved.
 - Fingerprints without a serial number identify a model rather than one physical unit; the UI warns about this case.
-- The PoC does not implement encryption, malware scanning, content inspection, or physical USB/PnP device disablement.
+- The PoC does not implement encryption, malware scanning, or content inspection.
+- Device-level enforcement is implemented in a user-mode service and is
+  therefore best-effort: Windows must first publish a disk interface and
+  schedule the service callback. A virtualization product can theoretically
+  win that race. Guaranteed pre-claim enforcement requires a separately
+  designed and signed USB/PnP kernel filter driver; this project does not add
+  one.
+- Device disable is intentionally non-persistent (`CM_DISABLE_PERSIST` is not
+  used), reducing boot-loop and recovery risk. Devices disabled by the running
+  service are re-enabled when the policy is turned off or their hash becomes
+  approved. After a service or machine restart, an administrator may need to
+  enable/replug a newly approved device.
