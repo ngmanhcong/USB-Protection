@@ -12,6 +12,61 @@ static ULONGLONG HashByte(ULONGLONG hash, BYTE value)
     return hash * 1099511628211ULL;
 }
 
+static ULONGLONG HashIdentityString(const WCHAR* value,
+                                    ULONGLONG hash,
+                                    BOOL* hasIdentity)
+{
+    const WCHAR* start;
+    const WCHAR* end;
+    const WCHAR* cursor;
+    WCHAR character;
+
+    if (value == NULL) {
+        return HashByte(hash, '|');
+    }
+
+    start = value;
+    while (*start == L' ') {
+        start++;
+    }
+
+    end = start + wcslen(start);
+    while (end > start && end[-1] == L' ') {
+        end--;
+    }
+
+    for (cursor = start; cursor < end; cursor++) {
+        character = *cursor;
+        if (character >= L'a' && character <= L'z') {
+            character = (WCHAR)(character - (L'a' - L'A'));
+        }
+
+        /* Storage descriptor identity strings are ASCII. */
+        if (character <= 0x7f) {
+            hash = HashByte(hash, (BYTE)character);
+            *hasIdentity = TRUE;
+        }
+    }
+
+    return HashByte(hash, '|');
+}
+
+ULONGLONG UsbDevicesHashIdentityStrings(const WCHAR* vendor,
+                                        const WCHAR* product,
+                                        const WCHAR* revision,
+                                        const WCHAR* serial)
+{
+    ULONGLONG hash = 14695981039346656037ULL;
+    BOOL hasIdentity = FALSE;
+
+    hash = HashIdentityString(vendor, hash, &hasIdentity);
+    hash = HashIdentityString(product, hash, &hasIdentity);
+    hash = HashIdentityString(revision, hash, &hasIdentity);
+    hash = HashIdentityString(serial, hash, &hasIdentity);
+
+    return hasIdentity ? hash : 0;
+}
+
 static ULONGLONG HashDescriptorField(const BYTE* descriptorBuffer,
                                      DWORD descriptorLength,
                                      DWORD offset,

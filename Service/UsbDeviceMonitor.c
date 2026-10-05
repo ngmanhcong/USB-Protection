@@ -7,6 +7,7 @@
 #include <initguid.h>
 #include <winioctl.h>
 #include <setupapi.h>
+#include <usbiodef.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <strsafe.h>
@@ -17,13 +18,18 @@
 #define USBP_DESCRIPTOR_BUFFER_SIZE 1024
 #define USBP_MAX_TRACKED_DISABLED_DEVICES 64
 #define USBP_MAX_ANCESTOR_DEPTH 16
+#define USBP_PNP_SETTLE_RETRY_COUNT 8
+#define USBP_PNP_SETTLE_RETRY_MS 100
+#define USBP_LOG_DIRECTORY L"C:\\ProgramData\\UsbProtection"
+#define USBP_LOG_PATH USBP_LOG_DIRECTORY L"\\DeviceControl.log"
 
 typedef struct _USBP_DISABLED_DEVICE {
     WCHAR InstanceId[MAX_DEVICE_ID_LEN];
     ULONGLONG DeviceHash;
 } USBP_DISABLED_DEVICE;
 
-static HCMNOTIFICATION gDeviceNotification = NULL;
+static HCMNOTIFICATION gDiskNotification = NULL;
+static HCMNOTIFICATION gUsbNotification = NULL;
 static HANDLE gMonitorStopEvent = NULL;
 static HANDLE gMonitorScanEvent = NULL;
 static HANDLE gMonitorThread = NULL;
@@ -37,6 +43,11 @@ static void DeviceControlLog(const wchar_t* format, ...)
 {
     wchar_t message[512];
     wchar_t line[600];
+    char utf8Line[1800];
+    SYSTEMTIME localTime;
+    HANDLE logFile;
+    DWORD bytesToWrite;
+    DWORD bytesWritten;
     va_list args;
 
     va_start(args, format);
@@ -46,15 +57,52 @@ static void DeviceControlLog(const wchar_t* format, ...)
     }
     va_end(args);
 
+    GetLocalTime(&localTime);
     if (FAILED(StringCchPrintfW(line,
                                 ARRAYSIZE(line),
+                                L"[%04u-%02u-%02u %02u:%02u:%02u] "
                                 L"[DeviceControl] %s\r\n",
+                                localTime.wYear,
+                                localTime.wMonth,
+                                localTime.wDay,
+                                localTime.wHour,
+                                localTime.wMinute,
+                                localTime.wSecond,
                                 message))) {
         return;
     }
 
     OutputDebugStringW(line);
     fwprintf(stderr, L"%ls", line);
+
+    CreateDirectoryW(USBP_LOG_DIRECTORY, NULL);
+    logFile = CreateFileW(USBP_LOG_PATH,
+                          FILE_APPEND_DATA,
+                          FILE_SHARE_READ | FILE_SHARE_WRITE,
+                          NULL,
+                          OPEN_ALWAYS,
+                          FILE_ATTRIBUTE_NORMAL,
+                          NULL);
+    if (logFile == INVALID_HANDLE_VALUE) {
+        return;
+    }
+
+    bytesToWrite = (DWORD)WideCharToMultiByte(CP_UTF8,
+                                               0,
+                                               line,
+                                               -1,
+                                               utf8Line,
+                                               sizeof(utf8Line),
+                                               NULL,
+                                               NULL);
+    if (bytesToWrite > 1) {
+        WriteFile(logFile,
+                  utf8Line,
+                  bytesToWrite - 1,
+                  &bytesWritten,
+                  NULL);
+    }
+    CloseHandle(logFile);
 }
 
 static DWORD ConfigRetToWin32(CONFIGRET result)
@@ -223,6 +271,142 @@ static BOOL FindPhysicalUsbDevice(DEVINST diskDevInst,
     return FALSE;
 }
 
+static BOOL CopyUsbStorIdentityPart(const wchar_t* start,
+                                    const wchar_t* end,
+                                    wchar_t* output,
+                                    size_t outputCount)
+{
+    size_t target = 0;
+
+    if (start == NULL || end == NULL || output == NULL ||
+        outputCount == 0 || end < start) {
+        return FALSE;
+    }
+
+    while (start < end && target + 1 < outputCount) {
+        /* PnP replaces spaces in USBSTOR hardware IDs with underscores. */
+        output[target++] = *start == L'_' ? L' ' : *start;
+        start++;
+    }
+    output[target] = L'\0';
+    return start == end;
+}
+
+static const wchar_t* FindCaseInsensitiveSubstring(const wchar_t* value,
+                                                   const wchar_t* pattern)
+{
+    size_t patternLength;
+
+    if (value == NULL || pattern == NULL) {
+        return NULL;
+    }
+
+    patternLength = wcslen(pattern);
+    if (patternLength == 0) {
+        return value;
+    }
+
+    while (*value != L'\0') {
+        if (_wcsnicmp(value, pattern, patternLength) == 0) {
+            return value;
+        }
+        value++;
+    }
+
+    return NULL;
+}
+
+static ULONGLONG HashUsbStorInstanceId(const wchar_t* instanceId,
+                                       DEVINST usbStorDevInst)
+{
+    const wchar_t* vendorMarker;
+    const wchar_t* productMarker;
+    const wchar_t* revisionMarker;
+    const wchar_t* serialMarker;
+    const wchar_t* serialEnd;
+    const wchar_t* suffix;
+    wchar_t vendor[64];
+    wchar_t product[96];
+    wchar_t revision[32];
+    wchar_t serial[128];
+    ULONG capabilities = 0;
+    ULONG capabilitiesSize = sizeof(capabilities);
+
+    if (instanceId == NULL ||
+        _wcsnicmp(instanceId, L"USBSTOR\\", 8) != 0) {
+        return 0;
+    }
+
+    vendorMarker = FindCaseInsensitiveSubstring(instanceId, L"&Ven_");
+    productMarker = FindCaseInsensitiveSubstring(instanceId, L"&Prod_");
+    revisionMarker = FindCaseInsensitiveSubstring(instanceId, L"&Rev_");
+    if (vendorMarker == NULL || productMarker == NULL ||
+        revisionMarker == NULL ||
+        !(vendorMarker < productMarker && productMarker < revisionMarker)) {
+        return 0;
+    }
+
+    serialMarker = wcschr(revisionMarker + 5, L'\\');
+    if (serialMarker == NULL || serialMarker[1] == L'\0') {
+        return 0;
+    }
+    serialMarker++;
+    serialEnd = serialMarker + wcslen(serialMarker);
+
+    /* Windows normally appends an instance suffix such as "&0". */
+    suffix = wcsrchr(serialMarker, L'&');
+    if (suffix != NULL && suffix + 1 < serialEnd) {
+        const wchar_t* digit;
+        BOOL numericSuffix = TRUE;
+
+        for (digit = suffix + 1; digit < serialEnd; digit++) {
+            if (*digit < L'0' || *digit > L'9') {
+                numericSuffix = FALSE;
+                break;
+            }
+        }
+        if (numericSuffix) {
+            serialEnd = suffix;
+        }
+    }
+
+    if (!CopyUsbStorIdentityPart(vendorMarker + 5,
+                                 productMarker,
+                                 vendor,
+                                 ARRAYSIZE(vendor)) ||
+        !CopyUsbStorIdentityPart(productMarker + 6,
+                                 revisionMarker,
+                                 product,
+                                 ARRAYSIZE(product)) ||
+        !CopyUsbStorIdentityPart(revisionMarker + 5,
+                                 serialMarker - 1,
+                                 revision,
+                                 ARRAYSIZE(revision)) ||
+        !CopyUsbStorIdentityPart(serialMarker,
+                                 serialEnd,
+                                 serial,
+                                 ARRAYSIZE(serial))) {
+        return 0;
+    }
+
+    /*
+     * If the USB device does not report a unique serial, Windows synthesizes
+     * the final instance-ID component. The storage descriptor has no serial
+     * in that case, so omit the synthetic value to keep the existing hash.
+     */
+    if (CM_Get_DevNode_Registry_PropertyW(usbStorDevInst,
+                                          CM_DRP_CAPABILITIES,
+                                          NULL,
+                                          &capabilities,
+                                          &capabilitiesSize,
+                                          0) != CR_SUCCESS ||
+        (capabilities & CM_DEVCAP_UNIQUEID) == 0) {
+        serial[0] = L'\0';
+    }
+
+    return UsbDevicesHashIdentityStrings(vendor, product, revision, serial);
+}
+
 static DWORD FindTrackedDevice(const wchar_t* instanceId)
 {
     DWORD index;
@@ -329,6 +513,99 @@ static BOOL WasProcessed(const wchar_t processed[][MAX_DEVICE_ID_LEN],
     return FALSE;
 }
 
+static void EvaluateUsbStorDevNodes(
+    const USBP_SAVED_POLICY* policy,
+    wchar_t processed[][MAX_DEVICE_ID_LEN],
+    DWORD* processedCount)
+{
+    HDEVINFO deviceInfoSet;
+    DWORD deviceIndex;
+
+    deviceInfoSet = SetupDiGetClassDevsW(NULL,
+                                         L"USBSTOR",
+                                         NULL,
+                                         DIGCF_PRESENT | DIGCF_ALLCLASSES);
+    if (deviceInfoSet == INVALID_HANDLE_VALUE) {
+        DeviceControlLog(L"Early USBSTOR enumeration failed, error=%lu",
+                         GetLastError());
+        return;
+    }
+
+    for (deviceIndex = 0;; deviceIndex++) {
+        SP_DEVINFO_DATA deviceInfoData;
+        WCHAR usbStorInstanceId[MAX_DEVICE_ID_LEN];
+        WCHAR physicalInstanceId[MAX_DEVICE_ID_LEN];
+        WCHAR vid[5];
+        WCHAR pid[5];
+        DEVINST usbDevInst;
+        ULONGLONG deviceHash;
+        CONFIGRET result;
+
+        ZeroMemory(&deviceInfoData, sizeof(deviceInfoData));
+        deviceInfoData.cbSize = sizeof(deviceInfoData);
+        if (!SetupDiEnumDeviceInfo(deviceInfoSet,
+                                   deviceIndex,
+                                   &deviceInfoData)) {
+            if (GetLastError() != ERROR_NO_MORE_ITEMS) {
+                DeviceControlLog(L"Early USBSTOR enumeration stopped, error=%lu",
+                                 GetLastError());
+            }
+            break;
+        }
+
+        result = CM_Get_Device_IDW(deviceInfoData.DevInst,
+                                   usbStorInstanceId,
+                                   ARRAYSIZE(usbStorInstanceId),
+                                   0);
+        if (result != CR_SUCCESS) {
+            continue;
+        }
+
+        if (!FindPhysicalUsbDevice(deviceInfoData.DevInst,
+                                   &usbDevInst,
+                                   physicalInstanceId,
+                                   vid,
+                                   pid)) {
+            continue;
+        }
+
+        if (WasProcessed(processed, *processedCount, physicalInstanceId)) {
+            continue;
+        }
+        if (*processedCount < USBP_MAX_TRACKED_DISABLED_DEVICES &&
+            SUCCEEDED(StringCchCopyW(processed[*processedCount],
+                                     MAX_DEVICE_ID_LEN,
+                                     physicalInstanceId))) {
+            (*processedCount)++;
+        }
+
+        deviceHash = HashUsbStorInstanceId(usbStorInstanceId,
+                                            deviceInfoData.DevInst);
+        DeviceControlLog(L"USB storage PnP node: VID=%s PID=%s",
+                         vid,
+                         pid);
+        DeviceControlLog(L"DeviceHash=%016I64X", deviceHash);
+
+        if (UsbPolicyContainsDevice(policy, deviceHash)) {
+            DeviceControlLog(L"Approved -> allow");
+            continue;
+        }
+
+        DeviceControlLog(L"Not approved -> disabling physical USB node");
+        result = CM_Disable_DevNode(usbDevInst, CM_DISABLE_UI_NOT_OK);
+        if (result == CR_SUCCESS) {
+            TrackDisabledDevice(physicalInstanceId, deviceHash);
+            DeviceControlLog(L"Device disabled successfully");
+        } else {
+            DeviceControlLog(L"Failed to disable device, error=%lu (CR=0x%08lX)",
+                             ConfigRetToWin32(result),
+                             result);
+        }
+    }
+
+    SetupDiDestroyDeviceInfoList(deviceInfoSet);
+}
+
 static void EvaluatePresentUsbStorage(void)
 {
     USBP_SAVED_POLICY policy;
@@ -351,6 +628,9 @@ static void EvaluatePresentUsbStorage(void)
         return;
     }
 
+    ZeroMemory(processed, sizeof(processed));
+    EvaluateUsbStorDevNodes(&policy, processed, &processedCount);
+
     deviceInfoSet = SetupDiGetClassDevsW(&GUID_DEVINTERFACE_DISK,
                                          NULL,
                                          NULL,
@@ -360,8 +640,6 @@ static void EvaluatePresentUsbStorage(void)
                          GetLastError());
         return;
     }
-
-    ZeroMemory(processed, sizeof(processed));
 
     for (interfaceIndex = 0;; interfaceIndex++) {
         SP_DEVICE_INTERFACE_DATA interfaceData;
@@ -495,7 +773,7 @@ static DWORD CALLBACK DeviceNotificationCallback(
     UNREFERENCED_PARAMETER(eventDataSize);
 
     if (action == CM_NOTIFY_ACTION_DEVICEINTERFACEARRIVAL) {
-        OutputDebugStringW(L"[DeviceControl] Disk interface arrival event\r\n");
+        OutputDebugStringW(L"[DeviceControl] USB/disk interface arrival event\r\n");
         if (gMonitorScanEvent != NULL) {
             SetEvent(gMonitorScanEvent);
         }
@@ -548,7 +826,22 @@ static DWORD WINAPI DeviceMonitorThread(LPVOID parameter)
         }
 
         if (waitResult == WAIT_OBJECT_0 + 1) {
-            EvaluatePresentUsbStorage();
+            DWORD retry;
+
+            /*
+             * A physical USB notification can precede creation of its
+             * USBSTOR child. Retry briefly so the service can disable the
+             * physical node before a virtualization stack redirects it.
+             */
+            for (retry = 0; retry < USBP_PNP_SETTLE_RETRY_COUNT; retry++) {
+                EvaluatePresentUsbStorage();
+                if (retry + 1 < USBP_PNP_SETTLE_RETRY_COUNT &&
+                    WaitForSingleObject(gMonitorStopEvent,
+                                        USBP_PNP_SETTLE_RETRY_MS) ==
+                        WAIT_OBJECT_0) {
+                    return 0;
+                }
+            }
             continue;
         }
 
@@ -608,10 +901,11 @@ BOOL UsbDeviceMonitorStart(void)
 
     /*
      * This is deliberately a user-mode, best-effort control. Notification is
-     * delivered only after PnP publishes the disk interface, so it cannot be
-     * an absolute pre-claim barrier against a competing virtualization stack.
-     * A guaranteed barrier would require a separately designed USB/PnP kernel
-     * filter; the existing file-system minifilter remains unchanged.
+     * requested for both the physical USB interface and the later disk
+     * interface. User-mode delivery still cannot be an absolute pre-claim
+     * barrier against a competing virtualization stack. A guaranteed barrier
+     * would require a separately designed USB/PnP kernel filter; the existing
+     * file-system minifilter remains unchanged.
      */
     ZeroMemory(&filter, sizeof(filter));
     filter.cbSize = sizeof(filter);
@@ -621,7 +915,17 @@ BOOL UsbDeviceMonitorStart(void)
     result = CM_Register_Notification(&filter,
                                       NULL,
                                       DeviceNotificationCallback,
-                                      &gDeviceNotification);
+                                      &gDiskNotification);
+    if (result != CR_SUCCESS) {
+        SetLastError(ConfigRetToWin32(result));
+        goto Failure;
+    }
+
+    filter.u.DeviceInterface.ClassGuid = GUID_DEVINTERFACE_USB_DEVICE;
+    result = CM_Register_Notification(&filter,
+                                      NULL,
+                                      DeviceNotificationCallback,
+                                      &gUsbNotification);
     if (result != CR_SUCCESS) {
         SetLastError(ConfigRetToWin32(result));
         goto Failure;
@@ -650,9 +954,13 @@ Failure:
     {
         DWORD error = GetLastError();
 
-        if (gDeviceNotification != NULL) {
-            CM_Unregister_Notification(gDeviceNotification);
-            gDeviceNotification = NULL;
+        if (gUsbNotification != NULL) {
+            CM_Unregister_Notification(gUsbNotification);
+            gUsbNotification = NULL;
+        }
+        if (gDiskNotification != NULL) {
+            CM_Unregister_Notification(gDiskNotification);
+            gDiskNotification = NULL;
         }
         if (gPolicyKey != NULL) {
             RegCloseKey(gPolicyKey);
@@ -677,9 +985,13 @@ Failure:
 
 void UsbDeviceMonitorStop(void)
 {
-    if (gDeviceNotification != NULL) {
-        CM_Unregister_Notification(gDeviceNotification);
-        gDeviceNotification = NULL;
+    if (gUsbNotification != NULL) {
+        CM_Unregister_Notification(gUsbNotification);
+        gUsbNotification = NULL;
+    }
+    if (gDiskNotification != NULL) {
+        CM_Unregister_Notification(gDiskNotification);
+        gDiskNotification = NULL;
     }
 
     if (gMonitorStopEvent != NULL) {
