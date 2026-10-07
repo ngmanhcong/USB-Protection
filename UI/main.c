@@ -406,6 +406,7 @@ static BOOL GetSelectedDevice(PUSBP_DEVICE_INFO* device)
 static void ApproveSelectedDevice(void)
 {
     PUSBP_DEVICE_INFO device;
+    WCHAR instanceId[ARRAYSIZE(gDevices[0].InstanceId)];
 
     if (!GetSelectedDevice(&device)) {
         return;
@@ -422,18 +423,18 @@ static void ApproveSelectedDevice(void)
         return;
     }
 
-    if (!UsbProtectionSendAddApprovedDevice(gDriverPort, device->DeviceHash)) {
-        ShowLastErrorMessage(L"Gửi thiết bị được phê duyệt tới driver");
-        return;
-    }
+    StringCchCopyW(instanceId, ARRAYSIZE(instanceId), device->InstanceId);
+
     if (!UsbPolicyAddDevice(&gPolicy, device->DeviceHash) || !PersistPolicy()) {
-        UsbProtectionSendRemoveApprovedDevice(gDriverPort, device->DeviceHash);
         UsbPolicyRemoveDevice(&gPolicy, device->DeviceHash);
         return;
     }
 
-    UpdateDeviceList();
-    SetStatus(L"Đã phê duyệt thiết bị. Cấu hình sẽ được nạp lại sau khi khởi động.");
+    if (instanceId[0] != L'\0' && device->Drives[0] == L'\0') {
+        UsbDevicesRestart(instanceId);
+    }
+    RefreshDevices();
+    SetStatus(L"Đã phê duyệt thiết bị và yêu cầu Windows khởi động lại USB.");
 }
 
 static void RevokeSelectedDevice(void)
@@ -448,17 +449,12 @@ static void RevokeSelectedDevice(void)
         return;
     }
 
-    if (!UsbProtectionSendRemoveApprovedDevice(gDriverPort, device->DeviceHash)) {
-        ShowLastErrorMessage(L"Thu hồi thiết bị trong driver");
-        return;
-    }
     if (!UsbPolicyRemoveDevice(&gPolicy, device->DeviceHash) || !PersistPolicy()) {
-        UsbProtectionSendAddApprovedDevice(gDriverPort, device->DeviceHash);
         UsbPolicyAddDevice(&gPolicy, device->DeviceHash);
         return;
     }
 
-    UpdateDeviceList();
+    RefreshDevices();
     SetStatus(L"Đã thu hồi quyền truy cập của thiết bị.");
 }
 
@@ -468,7 +464,7 @@ static void TogglePolicy(UINT controlId)
     BOOL newValue = !oldValue;
     BOOL sent = FALSE;
 
-    if (!DriverConnected()) {
+    if (controlId != IDC_TOGGLE_APPROVED_ONLY && !DriverConnected()) {
         MessageBoxW(gMainWindow,
                     L"Không kết nối được driver. Hãy cài và tải UsbProtection trước.",
                     APP_TITLE,
@@ -479,7 +475,7 @@ static void TogglePolicy(UINT controlId)
     if (controlId == IDC_TOGGLE_APPROVED_ONLY && newValue &&
         gPolicy.ApprovedDeviceCount == 0) {
         if (MessageBoxW(gMainWindow,
-                        L"Danh sách phê duyệt đang trống. Bật tùy chọn này sẽ chặn truy cập tệp trên tất cả USB. Tiếp tục?",
+                        L"Danh sách phê duyệt đang trống. Bật tùy chọn này sẽ vô hiệu hóa mọi USB lưu trữ và ẩn ổ đĩa của chúng. Tiếp tục?",
                         APP_TITLE,
                         MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) {
             return;
@@ -501,10 +497,8 @@ static void TogglePolicy(UINT controlId)
         }
         break;
     case IDC_TOGGLE_APPROVED_ONLY:
-        sent = UsbProtectionSendSetApprovedOnly(gDriverPort, newValue);
-        if (sent) {
-            gPolicy.ApprovedOnlyEnabled = newValue ? 1 : 0;
-        }
+        gPolicy.ApprovedOnlyEnabled = newValue ? 1 : 0;
+        sent = TRUE;
         break;
     default:
         return;
@@ -527,11 +521,20 @@ static void TogglePolicy(UINT controlId)
             gPolicy.ExecutableBlockingEnabled = oldValue ? 1 : 0;
             break;
         case IDC_TOGGLE_APPROVED_ONLY:
-            UsbProtectionSendSetApprovedOnly(gDriverPort, oldValue);
             gPolicy.ApprovedOnlyEnabled = oldValue ? 1 : 0;
             break;
         }
     } else {
+        if (controlId == IDC_TOGGLE_APPROVED_ONLY && !newValue) {
+            DWORD deviceIndex;
+
+            for (deviceIndex = 0; deviceIndex < gDeviceCount; deviceIndex++) {
+                if (gDevices[deviceIndex].InstanceId[0] != L'\0') {
+                    UsbDevicesRestart(gDevices[deviceIndex].InstanceId);
+                }
+            }
+            RefreshDevices();
+        }
         SetStatus(newValue ? L"Đã bật chính sách." : L"Đã tắt chính sách.");
     }
 
@@ -615,8 +618,6 @@ static void InitializeDeviceList(HWND list)
 static BOOL InitializeApplication(HWND window)
 {
     USB_PROTECTION_POLICY_REPLY livePolicy;
-    DWORD approvedIndex;
-    BOOL allowlistSynchronized;
 
     UsbPolicyLoad(&gPolicy);
 
@@ -681,26 +682,6 @@ static BOOL InitializeApplication(HWND window)
         return FALSE;
     }
 
-    /*
-     * Normally the service has already restored this list. Re-synchronizing
-     * here also makes the UI self-contained when the driver was loaded
-     * manually and the service has not started yet.
-     */
-    allowlistSynchronized = UsbProtectionSendClearApprovedDevices(gDriverPort);
-    if (allowlistSynchronized) {
-        for (approvedIndex = 0;
-             approvedIndex < gPolicy.ApprovedDeviceCount;
-             approvedIndex++) {
-            if (!UsbProtectionSendAddApprovedDevice(
-                    gDriverPort,
-                    gPolicy.ApprovedDevices[approvedIndex])) {
-                ShowLastErrorMessage(L"Đồng bộ danh sách thiết bị được phê duyệt");
-                allowlistSynchronized = FALSE;
-                break;
-            }
-        }
-    }
-
     if (gPolicy.DataLeakProtectionEnabled) {
         UsbProtectionSendEnable(gDriverPort);
     } else {
@@ -709,15 +690,9 @@ static BOOL InitializeApplication(HWND window)
     UsbProtectionSendSetExecutableBlocking(
         gDriverPort,
         gPolicy.ExecutableBlockingEnabled != 0);
-    if (allowlistSynchronized) {
-        UsbProtectionSendSetApprovedOnly(gDriverPort,
-                                         gPolicy.ApprovedOnlyEnabled != 0);
-    }
-
     if (UsbProtectionSendQueryPolicy(gDriverPort, &livePolicy)) {
         gPolicy.DataLeakProtectionEnabled = livePolicy.DataLeakProtectionEnabled;
         gPolicy.ExecutableBlockingEnabled = livePolicy.ExecutableBlockingEnabled;
-        gPolicy.ApprovedOnlyEnabled = livePolicy.ApprovedOnlyEnabled;
     }
 
     RefreshDevices();
@@ -813,6 +788,7 @@ static LRESULT CALLBACK WindowProcedure(HWND window,
     return DefWindowProcW(window, message, wParam, lParam);
 }
 
+_Use_decl_annotations_
 int WINAPI wWinMain(HINSTANCE instance,
                     HINSTANCE previousInstance,
                     PWSTR commandLine,
@@ -822,6 +798,7 @@ int WINAPI wWinMain(HINSTANCE instance,
     WNDCLASSEXW windowClass;
     HWND window;
     MSG message;
+    BOOL messageResult;
 
     UNREFERENCED_PARAMETER(previousInstance);
     UNREFERENCED_PARAMETER(commandLine);
@@ -867,9 +844,14 @@ int WINAPI wWinMain(HINSTANCE instance,
     ShowWindow(window, showCommand);
     UpdateWindow(window);
 
-    while (GetMessageW(&message, NULL, 0, 0) > 0) {
+    ZeroMemory(&message, sizeof(message));
+    while ((messageResult = GetMessageW(&message, NULL, 0, 0)) > 0) {
         TranslateMessage(&message);
         DispatchMessageW(&message);
+    }
+
+    if (messageResult == -1) {
+        return 1;
     }
 
     return (int)message.wParam;

@@ -157,13 +157,19 @@ BOOL UsbPolicySave(const USBP_SAVED_POLICY* policy)
 
 BOOL UsbPolicyContainsDevice(const USBP_SAVED_POLICY* policy, ULONGLONG deviceHash)
 {
+    DWORD count;
     DWORD index;
 
     if (policy == NULL || deviceHash == 0) {
         return FALSE;
     }
 
-    for (index = 0; index < policy->ApprovedDeviceCount; index++) {
+    count = policy->ApprovedDeviceCount;
+    if (count > USB_PROTECTION_MAX_APPROVED_DEVICES) {
+        count = USB_PROTECTION_MAX_APPROVED_DEVICES;
+    }
+
+    for (index = 0; index < count; index++) {
         if (policy->ApprovedDevices[index] == deviceHash) {
             return TRUE;
         }
@@ -176,6 +182,11 @@ BOOL UsbPolicyAddDevice(PUSBP_SAVED_POLICY policy, ULONGLONG deviceHash)
 {
     if (policy == NULL || deviceHash == 0) {
         SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (policy->ApprovedDeviceCount > USB_PROTECTION_MAX_APPROVED_DEVICES) {
+        SetLastError(ERROR_INVALID_DATA);
         return FALSE;
     }
 
@@ -198,6 +209,11 @@ BOOL UsbPolicyRemoveDevice(PUSBP_SAVED_POLICY policy, ULONGLONG deviceHash)
 
     if (policy == NULL || deviceHash == 0) {
         SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (policy->ApprovedDeviceCount > USB_PROTECTION_MAX_APPROVED_DEVICES) {
+        SetLastError(ERROR_INVALID_DATA);
         return FALSE;
     }
 

@@ -22,11 +22,60 @@ $serviceExe = Join-Path $outputDirectory "UsbProtectionService.exe"
 $uiExe = Join-Path $outputDirectory "UsbProtectionUI.exe"
 $certificate = Join-Path $outputDirectory "UsbProtectionDriver.cer"
 
-foreach ($requiredFile in @($driverInf, $driverSys, $driverCatalog, $serviceExe, $uiExe)) {
+foreach ($requiredFile in @(
+    $driverInf,
+    $driverSys,
+    $driverCatalog,
+    $serviceExe,
+    $uiExe
+)) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "Missing build output: $requiredFile"
     }
 }
+
+function Remove-ObsoleteAuthorizationFilter {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ClassGuid
+    )
+
+    $filterName = "UsbAuthorizationFilter"
+    $classKey = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\$ClassGuid"
+    $classProperties = Get-ItemProperty -LiteralPath $classKey
+    $lowerFiltersProperty = $classProperties.PSObject.Properties["LowerFilters"]
+    $currentFilters = @()
+
+    if ($null -ne $lowerFiltersProperty) {
+        $currentFilters = @($lowerFiltersProperty.Value) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    }
+
+    $updatedFilters = @($currentFilters |
+        Where-Object { -not [string]::Equals($_, $filterName, [StringComparison]::OrdinalIgnoreCase) })
+
+    if ($updatedFilters.Count -eq 0) {
+        Remove-ItemProperty -LiteralPath $classKey -Name "LowerFilters" -ErrorAction SilentlyContinue
+    } elseif ($null -eq $lowerFiltersProperty) {
+        New-ItemProperty -LiteralPath $classKey `
+            -Name "LowerFilters" `
+            -PropertyType MultiString `
+            -Value $updatedFilters | Out-Null
+    } else {
+        Set-ItemProperty -LiteralPath $classKey `
+            -Name "LowerFilters" `
+            -Value $updatedFilters
+    }
+}
+
+# Remove the retired class-wide filter from packages used in earlier tests.
+# Never delete the whole LowerFilters value when unrelated filters are present.
+Remove-ObsoleteAuthorizationFilter `
+    -ClassGuid "{4D36E97B-E325-11CE-BFC1-08002BE10318}"
+Remove-ObsoleteAuthorizationFilter `
+    -ClassGuid "{36FC9E60-C465-11CF-8056-444553540000}"
+& sc.exe stop UsbAuthorizationFilter *> $null
+& sc.exe delete UsbAuthorizationFilter *> $null
 
 $catalogSignature = Get-AuthenticodeSignature -LiteralPath $driverCatalog
 if ($null -eq $catalogSignature.SignerCertificate) {

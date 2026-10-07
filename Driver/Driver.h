@@ -13,14 +13,12 @@
 typedef struct _USBPROTECT_INSTANCE_CONTEXT {
     BOOLEAN IsUsb;
     BOOLEAN IsRemovable;
-    ULONGLONG DeviceHash;
 } USBPROTECT_INSTANCE_CONTEXT, *PUSBPROTECT_INSTANCE_CONTEXT;
 
 extern PFLT_FILTER gUsbProtectFilter;
 extern PFLT_PORT gUsbProtectServerPort;
 extern volatile LONG gUsbProtectEnabled;
 extern volatile LONG gUsbProtectExecutableBlockingEnabled;
-extern volatile LONG gUsbProtectApprovedOnlyEnabled;
 
 BOOLEAN
 UsbProtectIsProtectionEnabled(
@@ -46,47 +44,6 @@ UsbProtectIsExecutableBlockingEnabled(
 VOID
 UsbProtectSetExecutableBlockingEnabled(
     _In_ BOOLEAN Enabled
-    );
-
-BOOLEAN
-UsbProtectIsApprovedOnlyEnabled(
-    VOID
-    );
-
-VOID
-UsbProtectSetApprovedOnlyEnabled(
-    _In_ BOOLEAN Enabled
-    );
-
-NTSTATUS
-UsbProtectAddApprovedDevice(
-    _In_ ULONGLONG DeviceHash
-    );
-
-BOOLEAN
-UsbProtectRemoveApprovedDevice(
-    _In_ ULONGLONG DeviceHash
-    );
-
-VOID
-UsbProtectClearApprovedDevices(
-    VOID
-    );
-
-BOOLEAN
-UsbProtectIsDeviceApproved(
-    _In_ ULONGLONG DeviceHash
-    );
-
-ULONG
-UsbProtectGetApprovedDeviceCount(
-    VOID
-    );
-
-BOOLEAN
-UsbProtectGetApprovedDeviceAt(
-    _In_ ULONG Index,
-    _Out_ PULONGLONG DeviceHash
     );
 
 DRIVER_INITIALIZE DriverEntry;

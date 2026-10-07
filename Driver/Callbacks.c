@@ -4,19 +4,17 @@ static
 BOOLEAN
 UsbProtectGetTargetState(
     _In_ PCFLT_RELATED_OBJECTS FltObjects,
-    _Out_ PBOOLEAN ProtectedTarget,
-    _Out_ PULONGLONG DeviceHash
+    _Out_ PBOOLEAN ProtectedTarget
     )
 {
     NTSTATUS status;
     PUSBPROTECT_INSTANCE_CONTEXT context = NULL;
 
-    if (ProtectedTarget == NULL || DeviceHash == NULL) {
+    if (ProtectedTarget == NULL) {
         return FALSE;
     }
 
     *ProtectedTarget = FALSE;
-    *DeviceHash = 0;
 
     if (FltObjects == NULL || FltObjects->Instance == NULL) {
         return FALSE;
@@ -28,7 +26,6 @@ UsbProtectGetTargetState(
     }
 
     *ProtectedTarget = (context->IsUsb || context->IsRemovable);
-    *DeviceHash = context->DeviceHash;
     FltReleaseContext(context);
 
     return TRUE;
@@ -41,55 +38,12 @@ UsbProtectIsProtectedTarget(
     )
 {
     BOOLEAN protectedTarget;
-    ULONGLONG deviceHash;
 
-    if (!UsbProtectGetTargetState(FltObjects, &protectedTarget, &deviceHash)) {
+    if (!UsbProtectGetTargetState(FltObjects, &protectedTarget)) {
         return FALSE;
     }
 
-    UNREFERENCED_PARAMETER(deviceHash);
     return protectedTarget;
-}
-
-static
-BOOLEAN
-UsbProtectShouldBlockUnapprovedDevice(
-    _In_ PCFLT_RELATED_OBJECTS FltObjects
-    )
-{
-    BOOLEAN protectedTarget;
-    ULONGLONG deviceHash;
-
-    if (!UsbProtectIsApprovedOnlyEnabled()) {
-        return FALSE;
-    }
-
-    if (!UsbProtectGetTargetState(FltObjects, &protectedTarget, &deviceHash) ||
-        !protectedTarget) {
-        return FALSE;
-    }
-
-    return !UsbProtectIsDeviceApproved(deviceHash);
-}
-
-static
-BOOLEAN
-UsbProtectIsDirectVolumeOpen(
-    _In_ PCFLT_RELATED_OBJECTS FltObjects
-    )
-{
-    if (FltObjects == NULL || FltObjects->FileObject == NULL) {
-        return TRUE;
-    }
-
-    if (FltObjects->FileObject->FileName.Length == 0) {
-        return TRUE;
-    }
-
-    return (FltObjects->FileObject->RelatedFileObject == NULL &&
-            FltObjects->FileObject->FileName.Length == sizeof(WCHAR) &&
-            FltObjects->FileObject->FileName.Buffer != NULL &&
-            FltObjects->FileObject->FileName.Buffer[0] == L'\\');
 }
 
 static
@@ -255,7 +209,9 @@ UsbProtectSetInformationMayModifyFile(
         return TRUE;
 
     case FileDispositionInformation:
-        if (informationBuffer != NULL) {
+        if (informationBuffer != NULL &&
+            Data->Iopb->Parameters.SetFileInformation.Length >=
+                sizeof(FILE_DISPOSITION_INFORMATION)) {
             PFILE_DISPOSITION_INFORMATION disposition;
 
             disposition = (PFILE_DISPOSITION_INFORMATION)informationBuffer;
@@ -264,7 +220,9 @@ UsbProtectSetInformationMayModifyFile(
         return TRUE;
 
     case FileDispositionInformationEx:
-        if (informationBuffer != NULL) {
+        if (informationBuffer != NULL &&
+            Data->Iopb->Parameters.SetFileInformation.Length >=
+                sizeof(FILE_DISPOSITION_INFORMATION_EX)) {
             PFILE_DISPOSITION_INFORMATION_EX dispositionEx;
 
             dispositionEx = (PFILE_DISPOSITION_INFORMATION_EX)informationBuffer;
@@ -299,11 +257,6 @@ UsbProtectPreSetInformation(
 {
     UNREFERENCED_PARAMETER(CompletionContext);
 
-    if (UsbProtectShouldBlockUnapprovedDevice(FltObjects)) {
-        USBP_LOG("Unapproved USB file information change blocked");
-        return UsbProtectCompleteAccessDenied(Data);
-    }
-
     if (!UsbProtectIsProtectionEnabled()) {
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
     }
@@ -330,12 +283,6 @@ UsbProtectPreCreate(
     PUNICODE_STRING fileName;
 
     UNREFERENCED_PARAMETER(CompletionContext);
-
-    if (UsbProtectShouldBlockUnapprovedDevice(FltObjects) &&
-        !UsbProtectIsDirectVolumeOpen(FltObjects)) {
-        USBP_LOG("Unapproved USB access blocked");
-        return UsbProtectCompleteAccessDenied(Data);
-    }
 
     if (UsbProtectIsExecutableBlockingEnabled() &&
         UsbProtectIsProtectedTarget(FltObjects) &&
@@ -373,23 +320,6 @@ UsbProtectPreCreate(
 }
 
 FLT_PREOP_CALLBACK_STATUS
-UsbProtectPreRead(
-    _Inout_ PFLT_CALLBACK_DATA Data,
-    _In_ PCFLT_RELATED_OBJECTS FltObjects,
-    _Flt_CompletionContext_Outptr_ PVOID *CompletionContext
-    )
-{
-    UNREFERENCED_PARAMETER(CompletionContext);
-
-    if (UsbProtectShouldBlockUnapprovedDevice(FltObjects)) {
-        USBP_LOG("Unapproved USB read blocked");
-        return UsbProtectCompleteAccessDenied(Data);
-    }
-
-    return FLT_PREOP_SUCCESS_NO_CALLBACK;
-}
-
-FLT_PREOP_CALLBACK_STATUS
 UsbProtectPreWrite(
     _Inout_ PFLT_CALLBACK_DATA Data,
     _In_ PCFLT_RELATED_OBJECTS FltObjects,
@@ -397,11 +327,6 @@ UsbProtectPreWrite(
     )
 {
     UNREFERENCED_PARAMETER(CompletionContext);
-
-    if (UsbProtectShouldBlockUnapprovedDevice(FltObjects)) {
-        USBP_LOG("Unapproved USB write blocked");
-        return UsbProtectCompleteAccessDenied(Data);
-    }
 
     if (!UsbProtectIsProtectionEnabled()) {
         return FLT_PREOP_SUCCESS_NO_CALLBACK;
@@ -432,11 +357,6 @@ UsbProtectPreAcquireForSectionSynchronization(
     ULONG pageProtection;
 
     UNREFERENCED_PARAMETER(CompletionContext);
-
-    if (UsbProtectShouldBlockUnapprovedDevice(FltObjects)) {
-        USBP_LOG("Unapproved USB section creation blocked");
-        return UsbProtectCompleteAccessDenied(Data);
-    }
 
     if (!UsbProtectIsExecutableBlockingEnabled() ||
         !UsbProtectIsProtectedTarget(FltObjects)) {

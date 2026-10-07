@@ -14,21 +14,9 @@ static HANDLE gDriverPort = INVALID_HANDLE_VALUE;
 static BOOL ApplySavedPolicy(HANDLE driverPort)
 {
     USBP_SAVED_POLICY policy;
-    DWORD index;
 
     if (!UsbPolicyLoad(&policy)) {
         return FALSE;
-    }
-
-    if (!UsbProtectionSendClearApprovedDevices(driverPort)) {
-        return FALSE;
-    }
-
-    for (index = 0; index < policy.ApprovedDeviceCount; index++) {
-        if (!UsbProtectionSendAddApprovedDevice(driverPort,
-                                                policy.ApprovedDevices[index])) {
-            return FALSE;
-        }
     }
 
     if (policy.DataLeakProtectionEnabled) {
@@ -45,9 +33,7 @@ static BOOL ApplySavedPolicy(HANDLE driverPort)
         return FALSE;
     }
 
-    /* Enable this last, after every approved device has reached the driver. */
-    return UsbProtectionSendSetApprovedOnly(driverPort,
-                                            policy.ApprovedOnlyEnabled != 0);
+    return TRUE;
 }
 
 static void LogLastError(const wchar_t* message)
@@ -100,6 +86,8 @@ DWORD WINAPI UsbProtectionServiceHandler(DWORD control, DWORD eventType, LPVOID 
 
 void WINAPI UsbProtectionServiceMain(DWORD argc, LPWSTR* argv)
 {
+    BOOL monitorStarted;
+
     UNREFERENCED_PARAMETER(argc);
     UNREFERENCED_PARAMETER(argv);
 
@@ -125,17 +113,17 @@ void WINAPI UsbProtectionServiceMain(DWORD argc, LPWSTR* argv)
     }
 
     if (!UsbProtectionConnect(&gDriverPort)) {
-        DWORD error = GetLastError();
         LogLastError(L"FilterConnectCommunicationPort");
-        CloseHandle(gStopEvent);
-        gStopEvent = NULL;
-        SetServiceState(SERVICE_STOPPED, error, 0);
-        return;
+        gDriverPort = INVALID_HANDLE_VALUE;
+    } else if (!ApplySavedPolicy(gDriverPort)) {
+        LogLastError(L"ApplySavedPolicy");
     }
 
-    if (!ApplySavedPolicy(gDriverPort)) {
+    monitorStarted = UsbDeviceMonitorStart();
+    if (!monitorStarted) {
         DWORD error = GetLastError();
-        LogLastError(L"ApplySavedPolicy");
+
+        LogLastError(L"UsbDeviceMonitorStart");
         UsbProtectionDisconnect(gDriverPort);
         gDriverPort = INVALID_HANDLE_VALUE;
         CloseHandle(gStopEvent);
@@ -144,21 +132,15 @@ void WINAPI UsbProtectionServiceMain(DWORD argc, LPWSTR* argv)
         return;
     }
 
-    /*
-     * Device-level enforcement is additive. If PnP monitoring cannot start,
-     * keep the service and the existing minifilter policies operational.
-     */
-    if (!UsbDeviceMonitorStart()) {
-        LogLastError(L"UsbDeviceMonitorStart");
-    }
-
     SetServiceState(SERVICE_RUNNING, NO_ERROR, 0);
 
     WaitForSingleObject(gStopEvent, INFINITE);
 
     SetServiceState(SERVICE_STOP_PENDING, NO_ERROR, 3000);
 
-    UsbDeviceMonitorStop();
+    if (monitorStarted) {
+        UsbDeviceMonitorStop();
+    }
 
     UsbProtectionDisconnect(gDriverPort);
     gDriverPort = INVALID_HANDLE_VALUE;

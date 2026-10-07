@@ -1,5 +1,13 @@
 #include "Communication.h"
 
+#ifdef ALLOC_PRAGMA
+#pragma alloc_text(PAGE, UsbProtectCreateCommunicationPort)
+#pragma alloc_text(PAGE, UsbProtectCloseCommunicationPort)
+#pragma alloc_text(PAGE, UsbProtectConnectNotify)
+#pragma alloc_text(PAGE, UsbProtectDisconnectNotify)
+#pragma alloc_text(PAGE, UsbProtectMessageNotify)
+#endif
+
 NTSTATUS
 UsbProtectCreateCommunicationPort(
     VOID
@@ -106,7 +114,6 @@ UsbProtectMessageNotify(
     PUSB_PROTECTION_REPLY reply;
     PUSB_PROTECTION_POLICY_MESSAGE policyMessage;
     PUSB_PROTECTION_POLICY_REPLY policyReply;
-    ULONGLONG deviceHash;
 
     UNREFERENCED_PARAMETER(PortCookie);
 
@@ -145,60 +152,23 @@ UsbProtectMessageNotify(
         *ReturnOutputBufferLength = sizeof(USB_PROTECTION_REPLY);
         return STATUS_SUCCESS;
 
-    case UsbProtectionSetExecutableBlocking:
     case UsbProtectionSetApprovedOnly:
     case UsbProtectionAddApprovedDevice:
     case UsbProtectionRemoveApprovedDevice:
     case UsbProtectionQueryApprovedDevice:
+    case UsbProtectionClearApprovedDevices:
+        /* Authorization is owned by the user-mode device-control service. */
+        return STATUS_NOT_SUPPORTED;
+
+    case UsbProtectionSetExecutableBlocking:
         if (InputBufferLength < sizeof(USB_PROTECTION_POLICY_MESSAGE)) {
             return STATUS_INVALID_PARAMETER;
         }
 
         policyMessage = (PUSB_PROTECTION_POLICY_MESSAGE)InputBuffer;
-
-        switch (message->Command) {
-        case UsbProtectionSetExecutableBlocking:
-            UsbProtectSetExecutableBlockingEnabled(policyMessage->Value != 0);
-            USBP_LOG("Executable blocking %s",
-                     policyMessage->Value != 0 ? "enabled" : "disabled");
-            return STATUS_SUCCESS;
-
-        case UsbProtectionSetApprovedOnly:
-            UsbProtectSetApprovedOnlyEnabled(policyMessage->Value != 0);
-            USBP_LOG("Approved-device-only mode %s",
-                     policyMessage->Value != 0 ? "enabled" : "disabled");
-            return STATUS_SUCCESS;
-
-        case UsbProtectionAddApprovedDevice:
-            return UsbProtectAddApprovedDevice(policyMessage->DeviceHash);
-
-        case UsbProtectionRemoveApprovedDevice:
-            UsbProtectRemoveApprovedDevice(policyMessage->DeviceHash);
-            return STATUS_SUCCESS;
-
-        case UsbProtectionQueryApprovedDevice:
-            if (OutputBuffer == NULL ||
-                OutputBufferLength < sizeof(USB_PROTECTION_POLICY_REPLY)) {
-                return STATUS_BUFFER_TOO_SMALL;
-            }
-
-            if (!UsbProtectGetApprovedDeviceAt(policyMessage->Value, &deviceHash)) {
-                return STATUS_NOT_FOUND;
-            }
-
-            policyReply = (PUSB_PROTECTION_POLICY_REPLY)OutputBuffer;
-            RtlZeroMemory(policyReply, sizeof(*policyReply));
-            policyReply->DeviceHash = deviceHash;
-            *ReturnOutputBufferLength = sizeof(*policyReply);
-            return STATUS_SUCCESS;
-
-        default:
-            return STATUS_INVALID_PARAMETER;
-        }
-
-    case UsbProtectionClearApprovedDevices:
-        UsbProtectClearApprovedDevices();
-        USBP_LOG("Approved device list cleared");
+        UsbProtectSetExecutableBlockingEnabled(policyMessage->Value != 0);
+        USBP_LOG("Executable blocking %s",
+                 policyMessage->Value != 0 ? "enabled" : "disabled");
         return STATUS_SUCCESS;
 
     case UsbProtectionQueryPolicy:
@@ -213,9 +183,8 @@ UsbProtectMessageNotify(
             UsbProtectIsProtectionEnabled() ? 1 : 0;
         policyReply->ExecutableBlockingEnabled =
             UsbProtectIsExecutableBlockingEnabled() ? 1 : 0;
-        policyReply->ApprovedOnlyEnabled =
-            UsbProtectIsApprovedOnlyEnabled() ? 1 : 0;
-        policyReply->ApprovedDeviceCount = UsbProtectGetApprovedDeviceCount();
+        policyReply->ApprovedOnlyEnabled = 0;
+        policyReply->ApprovedDeviceCount = 0;
         *ReturnOutputBufferLength = sizeof(*policyReply);
         return STATUS_SUCCESS;
 

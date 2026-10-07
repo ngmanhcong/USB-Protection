@@ -112,25 +112,21 @@ static DWORD ConfigRetToWin32(CONFIGRET result)
 
 static BOOL QueryStorageIdentity(const wchar_t* devicePath,
                                  BOOL* isUsb,
-                                 BOOL* removableMedia,
-                                 ULONGLONG* deviceHash)
+                                 BOOL* removableMedia)
 {
     HANDLE device;
     STORAGE_PROPERTY_QUERY query;
     BYTE descriptorBuffer[USBP_DESCRIPTOR_BUFFER_SIZE];
     PSTORAGE_DEVICE_DESCRIPTOR descriptor;
     DWORD bytesReturned = 0;
-    DWORD descriptorLength;
 
-    if (devicePath == NULL || isUsb == NULL ||
-        removableMedia == NULL || deviceHash == NULL) {
+    if (devicePath == NULL || isUsb == NULL || removableMedia == NULL) {
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
 
     *isUsb = FALSE;
     *removableMedia = FALSE;
-    *deviceHash = 0;
 
     device = CreateFileW(devicePath,
                          0,
@@ -174,17 +170,8 @@ static BOOL QueryStorageIdentity(const wchar_t* devicePath,
         return FALSE;
     }
 
-    descriptorLength = descriptor->Size;
-    if (descriptorLength > bytesReturned) {
-        descriptorLength = bytesReturned;
-    }
-
     *isUsb = descriptor->BusType == BusTypeUsb;
     *removableMedia = descriptor->RemovableMedia != FALSE;
-    if (*isUsb) {
-        *deviceHash = UsbDevicesHashStorageDescriptor(descriptorBuffer,
-                                                      descriptorLength);
-    }
 
     return TRUE;
 }
@@ -269,142 +256,6 @@ static BOOL FindPhysicalUsbDevice(DEVINST diskDevInst,
     }
 
     return FALSE;
-}
-
-static BOOL CopyUsbStorIdentityPart(const wchar_t* start,
-                                    const wchar_t* end,
-                                    wchar_t* output,
-                                    size_t outputCount)
-{
-    size_t target = 0;
-
-    if (start == NULL || end == NULL || output == NULL ||
-        outputCount == 0 || end < start) {
-        return FALSE;
-    }
-
-    while (start < end && target + 1 < outputCount) {
-        /* PnP replaces spaces in USBSTOR hardware IDs with underscores. */
-        output[target++] = *start == L'_' ? L' ' : *start;
-        start++;
-    }
-    output[target] = L'\0';
-    return start == end;
-}
-
-static const wchar_t* FindCaseInsensitiveSubstring(const wchar_t* value,
-                                                   const wchar_t* pattern)
-{
-    size_t patternLength;
-
-    if (value == NULL || pattern == NULL) {
-        return NULL;
-    }
-
-    patternLength = wcslen(pattern);
-    if (patternLength == 0) {
-        return value;
-    }
-
-    while (*value != L'\0') {
-        if (_wcsnicmp(value, pattern, patternLength) == 0) {
-            return value;
-        }
-        value++;
-    }
-
-    return NULL;
-}
-
-static ULONGLONG HashUsbStorInstanceId(const wchar_t* instanceId,
-                                       DEVINST usbStorDevInst)
-{
-    const wchar_t* vendorMarker;
-    const wchar_t* productMarker;
-    const wchar_t* revisionMarker;
-    const wchar_t* serialMarker;
-    const wchar_t* serialEnd;
-    const wchar_t* suffix;
-    wchar_t vendor[64];
-    wchar_t product[96];
-    wchar_t revision[32];
-    wchar_t serial[128];
-    ULONG capabilities = 0;
-    ULONG capabilitiesSize = sizeof(capabilities);
-
-    if (instanceId == NULL ||
-        _wcsnicmp(instanceId, L"USBSTOR\\", 8) != 0) {
-        return 0;
-    }
-
-    vendorMarker = FindCaseInsensitiveSubstring(instanceId, L"&Ven_");
-    productMarker = FindCaseInsensitiveSubstring(instanceId, L"&Prod_");
-    revisionMarker = FindCaseInsensitiveSubstring(instanceId, L"&Rev_");
-    if (vendorMarker == NULL || productMarker == NULL ||
-        revisionMarker == NULL ||
-        !(vendorMarker < productMarker && productMarker < revisionMarker)) {
-        return 0;
-    }
-
-    serialMarker = wcschr(revisionMarker + 5, L'\\');
-    if (serialMarker == NULL || serialMarker[1] == L'\0') {
-        return 0;
-    }
-    serialMarker++;
-    serialEnd = serialMarker + wcslen(serialMarker);
-
-    /* Windows normally appends an instance suffix such as "&0". */
-    suffix = wcsrchr(serialMarker, L'&');
-    if (suffix != NULL && suffix + 1 < serialEnd) {
-        const wchar_t* digit;
-        BOOL numericSuffix = TRUE;
-
-        for (digit = suffix + 1; digit < serialEnd; digit++) {
-            if (*digit < L'0' || *digit > L'9') {
-                numericSuffix = FALSE;
-                break;
-            }
-        }
-        if (numericSuffix) {
-            serialEnd = suffix;
-        }
-    }
-
-    if (!CopyUsbStorIdentityPart(vendorMarker + 5,
-                                 productMarker,
-                                 vendor,
-                                 ARRAYSIZE(vendor)) ||
-        !CopyUsbStorIdentityPart(productMarker + 6,
-                                 revisionMarker,
-                                 product,
-                                 ARRAYSIZE(product)) ||
-        !CopyUsbStorIdentityPart(revisionMarker + 5,
-                                 serialMarker - 1,
-                                 revision,
-                                 ARRAYSIZE(revision)) ||
-        !CopyUsbStorIdentityPart(serialMarker,
-                                 serialEnd,
-                                 serial,
-                                 ARRAYSIZE(serial))) {
-        return 0;
-    }
-
-    /*
-     * If the USB device does not report a unique serial, Windows synthesizes
-     * the final instance-ID component. The storage descriptor has no serial
-     * in that case, so omit the synthetic value to keep the existing hash.
-     */
-    if (CM_Get_DevNode_Registry_PropertyW(usbStorDevInst,
-                                          CM_DRP_CAPABILITIES,
-                                          NULL,
-                                          &capabilities,
-                                          &capabilitiesSize,
-                                          0) != CR_SUCCESS ||
-        (capabilities & CM_DEVCAP_UNIQUEID) == 0) {
-        serial[0] = L'\0';
-    }
-
-    return UsbDevicesHashIdentityStrings(vendor, product, revision, serial);
 }
 
 static DWORD FindTrackedDevice(const wchar_t* instanceId)
@@ -498,6 +349,53 @@ static void ReconcileTrackedDevices(const USBP_SAVED_POLICY* policy)
     }
 }
 
+static void RestartNewlyAllowedDevices(const USBP_SAVED_POLICY* policy)
+{
+    PUSBP_DEVICE_INFO devices;
+    DWORD count;
+    DWORD index;
+
+    devices = (PUSBP_DEVICE_INFO)HeapAlloc(
+        GetProcessHeap(),
+        HEAP_ZERO_MEMORY,
+        sizeof(*devices) * USBP_MAX_CONNECTED_DEVICES);
+    if (devices == NULL) {
+        DeviceControlLog(L"Could not allocate USB enumeration buffer");
+        return;
+    }
+
+    count = UsbDevicesEnumerate(devices, USBP_MAX_CONNECTED_DEVICES);
+    for (index = 0; index < count; index++) {
+        DEVINST devInst;
+        ULONG status = 0;
+        ULONG problem = 0;
+
+        if (devices[index].InstanceId[0] == L'\0' ||
+            devices[index].Drives[0] != L'\0') {
+            continue;
+        }
+
+        if (policy->ApprovedOnlyEnabled != 0 &&
+            !UsbPolicyContainsDevice(policy, devices[index].DeviceHash)) {
+            continue;
+        }
+
+        if (CM_Locate_DevNodeW(&devInst,
+                               devices[index].InstanceId,
+                               CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS ||
+            CM_Get_DevNode_Status(&status, &problem, devInst, 0) != CR_SUCCESS ||
+            (status & DN_HAS_PROBLEM) == 0 || problem != CM_PROB_DISABLED) {
+            continue;
+        }
+
+        DeviceControlLog(L"Enabling newly allowed USB, hash=%016I64X",
+                         devices[index].DeviceHash);
+        UsbDevicesRestart(devices[index].InstanceId);
+    }
+
+    HeapFree(GetProcessHeap(), 0, devices);
+}
+
 static BOOL WasProcessed(const wchar_t processed[][MAX_DEVICE_ID_LEN],
                          DWORD processedCount,
                          const wchar_t* instanceId)
@@ -533,7 +431,6 @@ static void EvaluateUsbStorDevNodes(
 
     for (deviceIndex = 0;; deviceIndex++) {
         SP_DEVINFO_DATA deviceInfoData;
-        WCHAR usbStorInstanceId[MAX_DEVICE_ID_LEN];
         WCHAR physicalInstanceId[MAX_DEVICE_ID_LEN];
         WCHAR vid[5];
         WCHAR pid[5];
@@ -551,14 +448,6 @@ static void EvaluateUsbStorDevNodes(
                                  GetLastError());
             }
             break;
-        }
-
-        result = CM_Get_Device_IDW(deviceInfoData.DevInst,
-                                   usbStorInstanceId,
-                                   ARRAYSIZE(usbStorInstanceId),
-                                   0);
-        if (result != CR_SUCCESS) {
-            continue;
         }
 
         if (!FindPhysicalUsbDevice(deviceInfoData.DevInst,
@@ -579,8 +468,7 @@ static void EvaluateUsbStorDevNodes(
             (*processedCount)++;
         }
 
-        deviceHash = HashUsbStorInstanceId(usbStorInstanceId,
-                                            deviceInfoData.DevInst);
+        deviceHash = UsbDevicesHashInstanceId(physicalInstanceId);
         DeviceControlLog(L"USB storage PnP node: VID=%s PID=%s",
                          vid,
                          pid);
@@ -611,7 +499,7 @@ static void EvaluatePresentUsbStorage(void)
     USBP_SAVED_POLICY policy;
     HDEVINFO deviceInfoSet;
     DWORD interfaceIndex;
-    WCHAR processed[USBP_MAX_TRACKED_DISABLED_DEVICES][MAX_DEVICE_ID_LEN];
+    WCHAR (*processed)[MAX_DEVICE_ID_LEN] = NULL;
     DWORD processedCount = 0;
 
     if (!UsbPolicyLoad(&policy)) {
@@ -622,13 +510,22 @@ static void EvaluatePresentUsbStorage(void)
     }
 
     ReconcileTrackedDevices(&policy);
+    RestartNewlyAllowedDevices(&policy);
 
     if (policy.ApprovedOnlyEnabled == 0) {
         DeviceControlLog(L"Approved-only policy is off; USB device-level enforcement is idle");
         return;
     }
 
-    ZeroMemory(processed, sizeof(processed));
+    processed = (WCHAR (*)[MAX_DEVICE_ID_LEN])HeapAlloc(
+        GetProcessHeap(),
+        HEAP_ZERO_MEMORY,
+        sizeof(*processed) * USBP_MAX_TRACKED_DISABLED_DEVICES);
+    if (processed == NULL) {
+        DeviceControlLog(L"Could not allocate processed-device buffer");
+        return;
+    }
+
     EvaluateUsbStorDevNodes(&policy, processed, &processedCount);
 
     deviceInfoSet = SetupDiGetClassDevsW(&GUID_DEVINTERFACE_DISK,
@@ -638,6 +535,7 @@ static void EvaluatePresentUsbStorage(void)
     if (deviceInfoSet == INVALID_HANDLE_VALUE) {
         DeviceControlLog(L"Disk interface enumeration failed, error=%lu",
                          GetLastError());
+        HeapFree(GetProcessHeap(), 0, processed);
         return;
     }
 
@@ -703,8 +601,7 @@ static void EvaluatePresentUsbStorage(void)
 
         if (!QueryStorageIdentity(detailData->DevicePath,
                                   &isUsb,
-                                  &removableMedia,
-                                  &deviceHash)) {
+                                  &removableMedia)) {
             HeapFree(GetProcessHeap(), 0, detailData);
             continue;
         }
@@ -724,10 +621,13 @@ static void EvaluatePresentUsbStorage(void)
             continue;
         }
 
+
+        deviceHash = UsbDevicesHashInstanceId(instanceId);
+
         if (WasProcessed(processed, processedCount, instanceId)) {
             continue;
         }
-        if (processedCount < ARRAYSIZE(processed) &&
+        if (processedCount < USBP_MAX_TRACKED_DISABLED_DEVICES &&
             SUCCEEDED(StringCchCopyW(processed[processedCount],
                                      ARRAYSIZE(processed[processedCount]),
                                      instanceId))) {
@@ -758,6 +658,7 @@ static void EvaluatePresentUsbStorage(void)
     }
 
     SetupDiDestroyDeviceInfoList(deviceInfoSet);
+    HeapFree(GetProcessHeap(), 0, processed);
 }
 
 static DWORD CALLBACK DeviceNotificationCallback(

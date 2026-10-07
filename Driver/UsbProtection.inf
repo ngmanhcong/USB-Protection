@@ -15,9 +15,8 @@ CatalogFile=UsbProtection.cat ; file .cat - file luu chu ky va tinh toan ven cua
 PnpLockdown=1
 
 [DestinationDirs]
-DefaultDestDir=12 ; thu muc dich mac dinh
-UsbProtection.DriverFiles=12 ; thu muc chua cac file driver
-UsbProtection.DeleteDriverFiles=12
+DefaultDestDir=13 ; Driver Store
+UsbProtection.DriverFiles=13
 
 [DefaultInstall.NTamd64]
 OptionDesc=%ServiceDescription%	; mo ta lua chon cai dat
@@ -26,30 +25,20 @@ CopyFiles=UsbProtection.DriverFiles ; copy cac file trong section
 [DefaultInstall.NTamd64.Services]
 AddService=%ServiceName%,,UsbProtection.Downlevel.ServiceInstall ; them service vao he thong
 
-[DefaultInstall.NTamd64.10.0...25952]
+[DefaultInstall.NTamd64.10.0...26100]
 OptionDesc=%ServiceDescription%
 CopyFiles=UsbProtection.DriverFiles
 
-[DefaultInstall.NTamd64.10.0...25952.Services]
+[DefaultInstall.NTamd64.10.0...26100.Services]
 AddService=%ServiceName%,,UsbProtection.ServiceInstall
 
-[DefaultUninstall.NTamd64]
-LegacyUninstall=1
-DelFiles=UsbProtection.DeleteDriverFiles
-
-[DefaultUninstall.NTamd64.Services]
-DelService=%ServiceName%,0x200
-
 [UsbProtection.DriverFiles]
-UsbProtectionDriver.sys
-
-[UsbProtection.DeleteDriverFiles]
 UsbProtectionDriver.sys
 
 [UsbProtection.ServiceInstall]
 DisplayName=%ServiceDisplayName%
 Description=%ServiceDescription%
-ServiceBinary=%12%\UsbProtectionDriver.sys
+ServiceBinary=%13%\UsbProtectionDriver.sys
 Dependencies=FltMgr
 ServiceType=2
 StartType=3
@@ -65,7 +54,7 @@ HKR,"Parameters\Instances\%InstanceName%","Flags",0x00010001,0x0
 [UsbProtection.Downlevel.ServiceInstall]
 DisplayName=%ServiceDisplayName%
 Description=%ServiceDescription%
-ServiceBinary=%12%\UsbProtectionDriver.sys
+ServiceBinary=%13%\UsbProtectionDriver.sys
 Dependencies=FltMgr
 ServiceType=2
 StartType=3

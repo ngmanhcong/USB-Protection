@@ -149,42 +149,6 @@ BOOL UsbProtectionSendSetExecutableBlocking(HANDLE portHandle, BOOL enabled)
                              NULL);
 }
 
-BOOL UsbProtectionSendSetApprovedOnly(HANDLE portHandle, BOOL enabled)
-{
-    return SendPolicyCommand(portHandle,
-                             UsbProtectionSetApprovedOnly,
-                             enabled ? 1 : 0,
-                             0,
-                             NULL);
-}
-
-BOOL UsbProtectionSendClearApprovedDevices(HANDLE portHandle)
-{
-    return SendPolicyCommand(portHandle,
-                             UsbProtectionClearApprovedDevices,
-                             0,
-                             0,
-                             NULL);
-}
-
-BOOL UsbProtectionSendAddApprovedDevice(HANDLE portHandle, ULONGLONG deviceHash)
-{
-    return SendPolicyCommand(portHandle,
-                             UsbProtectionAddApprovedDevice,
-                             0,
-                             deviceHash,
-                             NULL);
-}
-
-BOOL UsbProtectionSendRemoveApprovedDevice(HANDLE portHandle, ULONGLONG deviceHash)
-{
-    return SendPolicyCommand(portHandle,
-                             UsbProtectionRemoveApprovedDevice,
-                             0,
-                             deviceHash,
-                             NULL);
-}
-
 BOOL UsbProtectionSendQueryPolicy(HANDLE portHandle, USB_PROTECTION_POLICY_REPLY* policy)
 {
     if (policy == NULL) {

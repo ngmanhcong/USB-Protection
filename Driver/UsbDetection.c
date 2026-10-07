@@ -11,6 +11,20 @@ UsbProtectSendStorageQuery(
     _Out_writes_bytes_(BufferLength) PVOID Buffer,
     _In_ ULONG BufferLength,
     _Out_ PULONG BytesReturned
+    );
+
+#ifdef ALLOC_PRAGMA
+#pragma alloc_text(PAGE, UsbProtectSendStorageQuery)
+#pragma alloc_text(PAGE, UsbProtectQueryVolumeUsbState)
+#endif
+
+static
+NTSTATUS
+UsbProtectSendStorageQuery(
+    _In_ PDEVICE_OBJECT DeviceObject,
+    _Out_writes_bytes_(BufferLength) PVOID Buffer,
+    _In_ ULONG BufferLength,
+    _Out_ PULONG BytesReturned
     )
 {
     STORAGE_PROPERTY_QUERY query;
@@ -21,7 +35,8 @@ UsbProtectSendStorageQuery(
 
     PAGED_CODE();
 
-    if (BytesReturned == NULL) {
+    if (DeviceObject == NULL || Buffer == NULL ||
+        BufferLength == 0 || BytesReturned == NULL) {
         return STATUS_INVALID_PARAMETER;
     }
 
@@ -54,114 +69,19 @@ UsbProtectSendStorageQuery(
     }
 
     if (NT_SUCCESS(status)) {
-        *BytesReturned = (ULONG)ioStatus.Information;
+        *BytesReturned = ioStatus.Information > BufferLength
+                             ? BufferLength
+                             : (ULONG)ioStatus.Information;
     }
 
     return status;
-}
-
-static
-ULONGLONG
-UsbProtectHashByte(
-    _In_ ULONGLONG Hash,
-    _In_ UCHAR Value
-    )
-{
-    Hash ^= Value;
-    return Hash * 1099511628211ULL;
-}
-
-static
-ULONGLONG
-UsbProtectHashDescriptorField(
-    _In_reads_bytes_(DescriptorLength) const UCHAR *DescriptorBuffer,
-    _In_ ULONG DescriptorLength,
-    _In_ ULONG Offset,
-    _In_ ULONGLONG Hash,
-    _Inout_ PBOOLEAN HasIdentity
-    )
-{
-    ULONG start;
-    ULONG end;
-    ULONG index;
-    UCHAR value;
-
-    if (Offset == 0 || Offset >= DescriptorLength) {
-        return UsbProtectHashByte(Hash, '|');
-    }
-
-    start = Offset;
-    while (start < DescriptorLength && DescriptorBuffer[start] == ' ') {
-        start++;
-    }
-
-    end = start;
-    while (end < DescriptorLength && DescriptorBuffer[end] != '\0') {
-        end++;
-    }
-
-    while (end > start && DescriptorBuffer[end - 1] == ' ') {
-        end--;
-    }
-
-    for (index = start; index < end; index++) {
-        value = DescriptorBuffer[index];
-        if (value >= 'a' && value <= 'z') {
-            value = (UCHAR)(value - ('a' - 'A'));
-        }
-        Hash = UsbProtectHashByte(Hash, value);
-        *HasIdentity = TRUE;
-    }
-
-    return UsbProtectHashByte(Hash, '|');
-}
-
-static
-ULONGLONG
-UsbProtectHashStorageDescriptor(
-    _In_reads_bytes_(DescriptorLength) const UCHAR *DescriptorBuffer,
-    _In_ ULONG DescriptorLength
-    )
-{
-    const STORAGE_DEVICE_DESCRIPTOR *descriptor;
-    ULONGLONG hash = 14695981039346656037ULL;
-    BOOLEAN hasIdentity = FALSE;
-
-    if (DescriptorLength < sizeof(STORAGE_DEVICE_DESCRIPTOR)) {
-        return 0;
-    }
-
-    descriptor = (const STORAGE_DEVICE_DESCRIPTOR *)DescriptorBuffer;
-    hash = UsbProtectHashDescriptorField(DescriptorBuffer,
-                                         DescriptorLength,
-                                         descriptor->VendorIdOffset,
-                                         hash,
-                                         &hasIdentity);
-    hash = UsbProtectHashDescriptorField(DescriptorBuffer,
-                                         DescriptorLength,
-                                         descriptor->ProductIdOffset,
-                                         hash,
-                                         &hasIdentity);
-    hash = UsbProtectHashDescriptorField(DescriptorBuffer,
-                                         DescriptorLength,
-                                         descriptor->ProductRevisionOffset,
-                                         hash,
-                                         &hasIdentity);
-    hash = UsbProtectHashDescriptorField(DescriptorBuffer,
-                                         DescriptorLength,
-                                         descriptor->SerialNumberOffset,
-                                         hash,
-                                         &hasIdentity);
-
-    return hasIdentity ? hash : 0;
 }
 
 NTSTATUS
 UsbProtectQueryVolumeUsbState(
     _In_ PFLT_VOLUME Volume,
     _Out_ PBOOLEAN IsUsb,
-    _Out_ PBOOLEAN IsRemovable,
-    _Out_ PULONGLONG DeviceHash
+    _Out_ PBOOLEAN IsRemovable
     )
 {
     NTSTATUS status;
@@ -170,17 +90,15 @@ UsbProtectQueryVolumeUsbState(
     PSTORAGE_DEVICE_DESCRIPTOR descriptor;
     BOOLEAN deviceIsRemovable;
     ULONG bytesReturned = 0;
-    ULONG descriptorLength;
 
     PAGED_CODE();
 
-    if (IsUsb == NULL || IsRemovable == NULL || DeviceHash == NULL) {
+    if (Volume == NULL || IsUsb == NULL || IsRemovable == NULL) {
         return STATUS_INVALID_PARAMETER;
     }
 
     *IsUsb = FALSE;
     *IsRemovable = FALSE;
-    *DeviceHash = 0;
 
     if (KeGetCurrentIrql() != PASSIVE_LEVEL) {
         return STATUS_INVALID_DEVICE_STATE;
@@ -212,14 +130,8 @@ UsbProtectQueryVolumeUsbState(
         return STATUS_DEVICE_DATA_ERROR;
     }
 
-    descriptorLength = descriptor->Size;
-    if (descriptorLength > bytesReturned) {
-        descriptorLength = bytesReturned;
-    }
-
     *IsUsb = (descriptor->BusType == BusTypeUsb) ? TRUE : FALSE;
     *IsRemovable = (descriptor->RemovableMedia || deviceIsRemovable) ? TRUE : FALSE;
-    *DeviceHash = UsbProtectHashStorageDescriptor(descriptorBuffer, descriptorLength);
 
     return STATUS_SUCCESS;
 }
