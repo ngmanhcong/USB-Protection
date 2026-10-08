@@ -4,3 +4,4 @@
 
 BOOL UsbDeviceMonitorStart(void);
 void UsbDeviceMonitorStop(void);
+void UsbDeviceMonitorSetDriverPort(HANDLE driverPort);

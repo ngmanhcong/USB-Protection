@@ -54,6 +54,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Common\PolicyStore.h" />
+    <ClInclude Include="..\Common\UsbIdentityHash.h" />
     <ClInclude Include="..\Common\UsbDevices.h" />
     <ClInclude Include="DriverCommunication.h" />
     <ClInclude Include="Service.h" />

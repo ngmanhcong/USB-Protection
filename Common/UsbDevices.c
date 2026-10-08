@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <strsafe.h>
 
+#include "UsbIdentityHash.h"
+
 #define USBP_DESCRIPTOR_BUFFER_SIZE 1024
 
 static ULONGLONG HashByte(ULONGLONG hash, BYTE value)
@@ -72,27 +74,7 @@ ULONGLONG UsbDevicesHashIdentityStrings(const WCHAR* vendor,
 
 ULONGLONG UsbDevicesHashInstanceId(const WCHAR* instanceId)
 {
-    ULONGLONG hash = 14695981039346656037ULL;
-    const WCHAR* cursor;
-
-    if (instanceId == NULL || instanceId[0] == L'\0') {
-        return 0;
-    }
-
-    for (cursor = instanceId; *cursor != L'\0'; cursor++) {
-        WCHAR character = *cursor;
-
-        if (character >= L'a' && character <= L'z') {
-            character = (WCHAR)(character - (L'a' - L'A'));
-        }
-        if (character > 0x7f) {
-            return 0;
-        }
-
-        hash = HashByte(hash, (BYTE)character);
-    }
-
-    return hash;
+    return UsbIdentityHashInstanceId(instanceId);
 }
 
 static ULONGLONG HashDescriptorField(const BYTE* descriptorBuffer,

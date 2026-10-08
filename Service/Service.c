@@ -119,6 +119,7 @@ void WINAPI UsbProtectionServiceMain(DWORD argc, LPWSTR* argv)
         LogLastError(L"ApplySavedPolicy");
     }
 
+    UsbDeviceMonitorSetDriverPort(gDriverPort);
     monitorStarted = UsbDeviceMonitorStart();
     if (!monitorStarted) {
         DWORD error = GetLastError();
@@ -141,6 +142,8 @@ void WINAPI UsbProtectionServiceMain(DWORD argc, LPWSTR* argv)
     if (monitorStarted) {
         UsbDeviceMonitorStop();
     }
+
+    UsbDeviceMonitorSetDriverPort(INVALID_HANDLE_VALUE);
 
     UsbProtectionDisconnect(gDriverPort);
     gDriverPort = INVALID_HANDLE_VALUE;

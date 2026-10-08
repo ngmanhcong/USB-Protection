@@ -163,3 +163,42 @@ BOOL UsbProtectionSendQueryPolicy(HANDLE portHandle, USB_PROTECTION_POLICY_REPLY
                              0,
                              policy);
 }
+
+BOOL UsbProtectionSendHubFilterPolicy(HANDLE portHandle,
+                                      BOOL approvedOnlyEnabled,
+                                      DWORD approvedDeviceCount,
+                                      const ULONGLONG* approvedDevices)
+{
+    USB_PROTECTION_HUB_POLICY_MESSAGE message;
+    DWORD bytesReturned = 0;
+    DWORD index;
+    HRESULT hr;
+
+    if (portHandle == NULL || portHandle == INVALID_HANDLE_VALUE ||
+        approvedDeviceCount > USB_PROTECTION_MAX_APPROVED_DEVICES ||
+        (approvedDeviceCount != 0 && approvedDevices == NULL)) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    ZeroMemory(&message, sizeof(message));
+    message.Command = (USBP_UINT32)UsbProtectionSetHubFilterPolicy;
+    message.Version = USB_PROTECTION_HUB_POLICY_VERSION;
+    message.ApprovedOnlyEnabled = approvedOnlyEnabled ? 1U : 0U;
+    message.ApprovedDeviceCount = approvedDeviceCount;
+    for (index = 0; index < approvedDeviceCount; index++) {
+        message.ApprovedDevices[index] = approvedDevices[index];
+    }
+
+    hr = FilterSendMessage(portHandle,
+                           &message,
+                           sizeof(message),
+                           NULL,
+                           0,
+                           &bytesReturned);
+    if (FAILED(hr)) {
+        SetLastError(HRESULT_CODE(hr));
+        return FALSE;
+    }
+    return TRUE;
+}

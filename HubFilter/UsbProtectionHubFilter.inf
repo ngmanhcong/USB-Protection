@@ -1,0 +1,53 @@
+;
+; Development/test class upper-filter package for USB hub and composite stacks.
+;
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider=%ManufacturerName%
+DriverVer=10/08/2026,1.0.0.0
+CatalogFile=UsbProtectionHubFilter.cat
+PnpLockdown=1
+
+[DestinationDirs]
+DefaultDestDir=13
+HubFilter.DriverFiles=13
+
+[DefaultInstall.NTamd64]
+OptionDesc=%ServiceDescription%
+CopyFiles=HubFilter.DriverFiles
+
+[DefaultInstall.NTamd64.Services]
+AddService=%ServiceName%,,HubFilter.ServiceInstall
+
+[HubFilter.DriverFiles]
+UsbProtectionHubFilter.sys
+
+[HubFilter.ServiceInstall]
+DisplayName=%ServiceDisplayName%
+Description=%ServiceDescription%
+ServiceBinary=%13%\UsbProtectionHubFilter.sys
+ServiceType=1
+StartType=3
+ErrorControl=1
+AddReg=HubFilter.Parameters
+
+[HubFilter.Parameters]
+; Fail-safe installation default. Enable deliberately on the isolated test host.
+HKR,"Parameters","HubFilterEnabled",0x00010001,0
+
+[SourceDisksFiles]
+UsbProtectionHubFilter.sys=1
+
+[SourceDisksNames]
+1=%DiskName%,,,
+
+[Strings]
+ManufacturerName="USB Protection PoC"
+ServiceName="UsbProtectionHubFilter"
+ServiceDisplayName="USB Protection Hub Filter"
+ServiceDescription="Filters USB mass-storage enumeration using the approved-device policy."
+DiskName="USB Protection Hub Filter Installation Disk"
+

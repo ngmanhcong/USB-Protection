@@ -1,7 +1,8 @@
 param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Debug",
-    [switch]$TrustTestCertificate
+    [switch]$TrustTestCertificate,
+    [switch]$EnableHubFilter
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +19,10 @@ $driverPackage = Join-Path $outputDirectory "UsbProtectionDriver"
 $driverInf = Join-Path $driverPackage "UsbProtection.inf"
 $driverSys = Join-Path $driverPackage "UsbProtectionDriver.sys"
 $driverCatalog = Join-Path $driverPackage "usbprotection.cat"
+$hubFilterPackage = Join-Path $outputDirectory "UsbProtectionHubFilter"
+$hubFilterInf = Join-Path $hubFilterPackage "UsbProtectionHubFilter.inf"
+$hubFilterSys = Join-Path $hubFilterPackage "UsbProtectionHubFilter.sys"
+$hubFilterCatalog = Join-Path $hubFilterPackage "usbprotectionhubfilter.cat"
 $serviceExe = Join-Path $outputDirectory "UsbProtectionService.exe"
 $uiExe = Join-Path $outputDirectory "UsbProtectionUI.exe"
 $certificate = Join-Path $outputDirectory "UsbProtectionDriver.cer"
@@ -26,11 +31,48 @@ foreach ($requiredFile in @(
     $driverInf,
     $driverSys,
     $driverCatalog,
+    $hubFilterInf,
+    $hubFilterSys,
+    $hubFilterCatalog,
     $serviceExe,
     $uiExe
 )) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "Missing build output: $requiredFile"
+    }
+}
+
+function Add-ClassUpperFilter {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ClassGuid,
+        [Parameter(Mandatory = $true)]
+        [string]$FilterName
+    )
+
+    $classKey = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\$ClassGuid"
+    $classProperties = Get-ItemProperty -LiteralPath $classKey
+    $upperFiltersProperty = $classProperties.PSObject.Properties["UpperFilters"]
+    $currentFilters = @()
+
+    if ($null -ne $upperFiltersProperty) {
+        $currentFilters = @($upperFiltersProperty.Value) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    }
+    if ($currentFilters -contains $FilterName) {
+        return
+    }
+
+    $updatedFilters = @($currentFilters) + $FilterName
+    if ($null -eq $upperFiltersProperty) {
+        New-ItemProperty -LiteralPath $classKey `
+            -Name "UpperFilters" `
+            -PropertyType MultiString `
+            -Value $updatedFilters | Out-Null
+    } else {
+        Set-ItemProperty -LiteralPath $classKey `
+            -Name "UpperFilters" `
+            -Value $updatedFilters
     }
 }
 
@@ -82,6 +124,11 @@ if ($null -eq $catalogSignature.SignerCertificate) {
     throw "The driver catalog is unsigned. Select a test certificate in Visual Studio Driver Signing settings, then rebuild."
 }
 
+$hubCatalogSignature = Get-AuthenticodeSignature -LiteralPath $hubFilterCatalog
+if ($null -eq $hubCatalogSignature.SignerCertificate) {
+    throw "The hub-filter catalog is unsigned. Select the same test certificate for UsbProtectionHubFilter, then rebuild."
+}
+
 if ($TrustTestCertificate) {
     if (-not (Test-Path -LiteralPath $certificate -PathType Leaf)) {
         throw "Test certificate was not found: $certificate"
@@ -95,6 +142,30 @@ if ($TrustTestCertificate) {
 
 & pnputil.exe /add-driver $driverInf /install
 if ($LASTEXITCODE -ne 0) { throw "Driver package installation failed." }
+
+& pnputil.exe /add-driver $hubFilterInf /install
+if ($LASTEXITCODE -ne 0) { throw "Hub-filter package installation failed." }
+
+# Windows package isolation does not permit a primitive INF to modify an
+# existing system class key. Preserve every existing filter and append ours.
+Add-ClassUpperFilter `
+    -ClassGuid "{36FC9E60-C465-11CF-8056-444553540000}" `
+    -FilterName "UsbProtectionHubFilter"
+Add-ClassUpperFilter `
+    -ClassGuid "{88BAE032-5A81-49F0-BC3D-A4FF138216D6}" `
+    -FilterName "UsbProtectionHubFilter"
+
+$hubParameters = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\UsbProtectionHubFilter\Parameters"
+New-Item -Path $hubParameters -Force | Out-Null
+$hubFilterEnabledValue = 0
+if ($EnableHubFilter) {
+    $hubFilterEnabledValue = 1
+}
+New-ItemProperty -LiteralPath $hubParameters `
+    -Name "HubFilterEnabled" `
+    -PropertyType DWord `
+    -Value $hubFilterEnabledValue `
+    -Force | Out-Null
 
 & fltmc.exe load UsbProtection
 if ($LASTEXITCODE -ne 0) {
@@ -117,4 +188,9 @@ if ($LASTEXITCODE -eq 0) {
 if ($LASTEXITCODE -ne 0) { throw "Could not start the Windows service." }
 
 Write-Host "USB Protection is installed and running." -ForegroundColor Green
+if ($EnableHubFilter) {
+    Write-Host "Hub filter is enabled. Reboot the isolated test machine before testing." -ForegroundColor Yellow
+} else {
+    Write-Host "Hub filter is installed but emergency-disabled. Reboot, then enable it only on the isolated test machine." -ForegroundColor Yellow
+}
 Start-Process -FilePath $uiExe

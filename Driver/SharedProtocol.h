@@ -7,11 +7,14 @@
  * service/control utility.
  */
 
-#if defined(_KERNEL_MODE) || defined(_NTDDK_) || defined(_FLT_KERNEL_)
+#if defined(_FLT_KERNEL_)
 #include <fltKernel.h>
+typedef ULONG USBP_UINT32;
+#elif defined(_KERNEL_MODE) || defined(_NTDDK_)
 typedef ULONG USBP_UINT32;
 #else
 #include <stdint.h>
+#include <winioctl.h>
 typedef uint32_t USBP_UINT32;
 #endif
 
@@ -28,7 +31,8 @@ typedef enum _USB_PROTECTION_COMMAND {
     UsbProtectionAddApprovedDevice = 7,
     UsbProtectionRemoveApprovedDevice = 8,
     UsbProtectionQueryPolicy = 9,
-    UsbProtectionQueryApprovedDevice = 10
+    UsbProtectionQueryApprovedDevice = 10,
+    UsbProtectionSetHubFilterPolicy = 11
 } USB_PROTECTION_COMMAND;
 
 typedef struct _USB_PROTECTION_MESSAGE {
@@ -59,3 +63,18 @@ typedef struct _USB_PROTECTION_POLICY_REPLY {
     USBP_UINT32 ApprovedDeviceCount;
     unsigned long long DeviceHash;
 } USB_PROTECTION_POLICY_REPLY, *PUSB_PROTECTION_POLICY_REPLY;
+
+/* Separate control channel owned by UsbProtectionHubFilter.sys. */
+#define USB_PROTECTION_HUBFILTER_NT_NAME L"\\Device\\UsbProtectionHubFilter"
+#define USB_PROTECTION_HUB_POLICY_VERSION 1
+
+#define IOCTL_USB_PROTECTION_SET_HUB_POLICY \
+    CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_WRITE_DATA)
+
+typedef struct _USB_PROTECTION_HUB_POLICY_MESSAGE {
+    USBP_UINT32 Command;
+    USBP_UINT32 Version;
+    USBP_UINT32 ApprovedOnlyEnabled;
+    USBP_UINT32 ApprovedDeviceCount;
+    unsigned long long ApprovedDevices[USB_PROTECTION_MAX_APPROVED_DEVICES];
+} USB_PROTECTION_HUB_POLICY_MESSAGE, *PUSB_PROTECTION_HUB_POLICY_MESSAGE;

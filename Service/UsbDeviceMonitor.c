@@ -1,6 +1,7 @@
 #define _WIN32_WINNT 0x0A00
 
 #include "UsbDeviceMonitor.h"
+#include "DriverCommunication.h"
 
 #include <Windows.h>
 #include <cfgmgr32.h>
@@ -34,6 +35,7 @@ static HANDLE gMonitorStopEvent = NULL;
 static HANDLE gMonitorScanEvent = NULL;
 static HANDLE gMonitorThread = NULL;
 static HANDLE gPolicyChangedEvent = NULL;
+static HANDLE gDriverPort = INVALID_HANDLE_VALUE;
 static HKEY gPolicyKey = NULL;
 static USBP_DISABLED_DEVICE
     gDisabledDevices[USBP_MAX_TRACKED_DISABLED_DEVICES];
@@ -509,6 +511,15 @@ static void EvaluatePresentUsbStorage(void)
         return;
     }
 
+    if (!UsbProtectionSendHubFilterPolicy(
+            gDriverPort,
+            policy.ApprovedOnlyEnabled != 0,
+            policy.ApprovedDeviceCount,
+            policy.ApprovedDevices)) {
+        DeviceControlLog(L"Hub-filter policy update failed, error=%lu",
+                         GetLastError());
+    }
+
     ReconcileTrackedDevices(&policy);
     RestartNewlyAllowedDevices(&policy);
 
@@ -659,6 +670,11 @@ static void EvaluatePresentUsbStorage(void)
 
     SetupDiDestroyDeviceInfoList(deviceInfoSet);
     HeapFree(GetProcessHeap(), 0, processed);
+}
+
+void UsbDeviceMonitorSetDriverPort(HANDLE driverPort)
+{
+    gDriverPort = driverPort;
 }
 
 static DWORD CALLBACK DeviceNotificationCallback(

@@ -1,12 +1,74 @@
 #include "Communication.h"
 
+static NTSTATUS UsbProtectForwardHubPolicy(
+    _In_reads_bytes_(InputBufferLength)
+        const USB_PROTECTION_HUB_POLICY_MESSAGE* Message,
+    _In_ ULONG InputBufferLength);
+
 #ifdef ALLOC_PRAGMA
 #pragma alloc_text(PAGE, UsbProtectCreateCommunicationPort)
 #pragma alloc_text(PAGE, UsbProtectCloseCommunicationPort)
 #pragma alloc_text(PAGE, UsbProtectConnectNotify)
 #pragma alloc_text(PAGE, UsbProtectDisconnectNotify)
 #pragma alloc_text(PAGE, UsbProtectMessageNotify)
+#pragma alloc_text(PAGE, UsbProtectForwardHubPolicy)
 #endif
+
+static NTSTATUS
+UsbProtectForwardHubPolicy(
+    _In_reads_bytes_(InputBufferLength)
+        const USB_PROTECTION_HUB_POLICY_MESSAGE* Message,
+    _In_ ULONG InputBufferLength
+    )
+{
+    UNICODE_STRING deviceName;
+    PFILE_OBJECT fileObject = NULL;
+    PDEVICE_OBJECT deviceObject = NULL;
+    KEVENT event;
+    IO_STATUS_BLOCK ioStatus;
+    PIRP irp;
+    NTSTATUS status;
+
+    PAGED_CODE();
+
+    RtlInitUnicodeString(&deviceName, USB_PROTECTION_HUBFILTER_NT_NAME);
+    status = IoGetDeviceObjectPointer(&deviceName,
+                                      FILE_WRITE_DATA,
+                                      &fileObject,
+                                      &deviceObject);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    KeInitializeEvent(&event, NotificationEvent, FALSE);
+    RtlZeroMemory(&ioStatus, sizeof(ioStatus));
+    irp = IoBuildDeviceIoControlRequest(IOCTL_USB_PROTECTION_SET_HUB_POLICY,
+                                        deviceObject,
+                                        (PVOID)Message,
+                                        InputBufferLength,
+                                        NULL,
+                                        0,
+                                        FALSE,
+                                        &event,
+                                        &ioStatus);
+    if (irp == NULL) {
+        ObDereferenceObject(fileObject);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    status = IoCallDriver(deviceObject, irp);
+    if (status == STATUS_PENDING) {
+        KeWaitForSingleObject(&event,
+                              Executive,
+                              KernelMode,
+                              FALSE,
+                              NULL);
+        status = ioStatus.Status;
+    }
+
+    ObDereferenceObject(fileObject);
+    return status;
+}
 
 NTSTATUS
 UsbProtectCreateCommunicationPort(
@@ -170,6 +232,14 @@ UsbProtectMessageNotify(
         USBP_LOG("Executable blocking %s",
                  policyMessage->Value != 0 ? "enabled" : "disabled");
         return STATUS_SUCCESS;
+
+    case UsbProtectionSetHubFilterPolicy:
+        if (InputBufferLength < sizeof(USB_PROTECTION_HUB_POLICY_MESSAGE)) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        return UsbProtectForwardHubPolicy(
+            (const USB_PROTECTION_HUB_POLICY_MESSAGE*)InputBuffer,
+            InputBufferLength);
 
     case UsbProtectionQueryPolicy:
         if (OutputBuffer == NULL ||
